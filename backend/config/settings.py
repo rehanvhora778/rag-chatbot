@@ -272,15 +272,6 @@ GROQ_MAX_OUTPUT_TOKENS = config('GROQ_MAX_OUTPUT_TOKENS', default=1024, cast=int
 GROQ_TEMPERATURE       = config('GROQ_TEMPERATURE', default=0.2, cast=float)
 
 # ═══════════════════════════════════════════════════════════════
-# GEMINI (legacy — kept for text_extractor Vision OCR fallback)
-# ═══════════════════════════════════════════════════════════════
-
-GEMINI_API_KEY           = config('GEMINI_API_KEY', default='')
-GEMINI_MODEL             = config('GEMINI_MODEL', default='gemini-2.0-flash-lite')
-GEMINI_MAX_OUTPUT_TOKENS = config('GEMINI_MAX_OUTPUT_TOKENS', default=2048, cast=int)
-GEMINI_TEMPERATURE       = config('GEMINI_TEMPERATURE', default=0.2, cast=float)
-
-# ═══════════════════════════════════════════════════════════════
 # RAG PIPELINE
 # ═══════════════════════════════════════════════════════════════
 

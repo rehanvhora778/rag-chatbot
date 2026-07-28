@@ -1,6 +1,5 @@
 """
 LLM Integration — uses Groq API (Llama 3.3 70B).
-Drop-in replacement for the previous Gemini service.
 """
 import time
 import logging

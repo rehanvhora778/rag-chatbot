@@ -1,6 +1,6 @@
 """
 Module 10: RAG Pipeline
-Orchestrates: query embedding → FAISS retrieval → context building → Gemini → citations.
+Orchestrates: query embedding → FAISS retrieval → context building → Groq LLM → citations.
 """
 import logging
 from typing import List, Dict, Any

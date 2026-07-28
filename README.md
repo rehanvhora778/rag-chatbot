@@ -17,7 +17,7 @@ Sentence-Transformers embeddings · Groq (Llama 3.3 70B) · React + Vite + Tailw
 │   ├── services/       RAG pipeline, embeddings, FAISS store, chunker, LLM, extractor
 │   ├── manage.py
 │   ├── requirements.txt
-│   ├── .env            secrets — not committed (copy from .env.example)
+│   ├── .env            secrets — not committed (create manually)
 │   ├── db.sqlite3      Django auth/JWT only (project data lives in MongoDB)
 │   ├── media/          uploaded files        (auto-created, gitignored)
 │   └── indexes/        per-user FAISS indexes (auto-created, gitignored)
@@ -29,35 +29,50 @@ Sentence-Transformers embeddings · Groq (Llama 3.3 70B) · React + Vite + Tailw
 
 - Python 3.11, Node.js 18+
 - **MongoDB** running on `localhost:27017`
-- A `GROQ_API_KEY` in `backend/.env` (copy `backend/.env.example` → `backend/.env`)
+- A `GROQ_API_KEY` in `backend/.env`
 
 ## Run (Windows)
 
-1. Make sure MongoDB is running.
-2. **Backend** — in one terminal:
-   ```bat
-   call venv\Scripts\activate
-   cd backend
-   python manage.py runserver
-   ```
-   Django starts on http://localhost:8000
-3. **Frontend** — in a second terminal:
-   ```bat
-   cd frontend
-   npm install
-   npm run dev
-   ```
-   Vite dev server starts on http://localhost:3000
-4. Open http://localhost:3000
+Make sure MongoDB is running, then open **two terminals**.
+
+**Backend** — terminal 1:
+```
+cd backend
+python manage.py runserver
+```
+Django starts on http://localhost:8000
+
+**Frontend** — terminal 2:
+```
+cd frontend
+npm run dev
+```
+Vite starts on http://localhost:3000 — open it in your browser.
+
+**Backend says `No module named 'django'`?** Your virtual-env isn't active. You don't
+need to activate it (or change PowerShell's execution policy) — just run the server
+with the venv's Python directly:
+```
+cd backend
+..\venv\Scripts\python manage.py runserver
+```
 
 ## First-time setup
 
-```bat
+Run these once from the project root:
+```
 python -m venv venv
-call venv\Scripts\activate
-pip install -r backend\requirements.txt
-copy backend\.env.example backend\.env   :: then edit and add GROQ_API_KEY
-cd backend && python manage.py migrate && python manage.py createsuperuser
-
-cd ..\frontend && npm install
+venv\Scripts\python -m pip install -r backend\requirements.txt
+```
+Create `backend\.env` and add your key:
+```
+GROQ_API_KEY=your-key-here
+```
+Set up the database, then install the frontend packages:
+```
+cd backend
+..\venv\Scripts\python manage.py migrate
+..\venv\Scripts\python manage.py createsuperuser
+cd ..\frontend
+npm install
 ```

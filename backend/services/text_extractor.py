@@ -1,7 +1,7 @@
 """
 Module 5: Text Extraction
 Extracts text with page-level metadata from PDF, DOCX, and TXT files.
-Supports native PDFs and scanned/image-based PDFs via Gemini Vision fallback.
+Supports native PDFs and scanned/image-based PDFs via Groq Vision (Llama) OCR fallback.
 """
 import logging
 from pathlib import Path
@@ -140,7 +140,7 @@ def _ocr_image_b64(img_b64: str, page_num: int) -> str:
 
 def extract_text_from_pdf(file_path: str) -> List[Dict[str, Any]]:
     """Extract text page-by-page from a PDF file.
-    Falls back to Gemini Vision for scanned/image-based pages.
+    Falls back to Groq Vision OCR for scanned/image-based pages.
     """
     import fitz  # PyMuPDF
     from django.conf import settings
