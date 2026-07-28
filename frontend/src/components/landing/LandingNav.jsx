@@ -10,9 +10,7 @@ const LINKS = [
   { id: 'home',       label: 'Home' },
   { id: 'features',   label: 'Features' },
   { id: 'tech-stack', label: 'Tech Stack' },
-  { id: 'github',     label: 'GitHub' },
-  { id: 'about',      label: 'About' },
-  { id: 'contact',    label: 'Contact' },
+  { id: 'how-rag',    label: 'How It Works' },
 ]
 const IDS = LINKS.map(l => l.id)
 

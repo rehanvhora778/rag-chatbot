@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ArrowLeft } from 'lucide-react'
 import { Logo, ThemeToggle } from './common'
-import { PROFILE } from './portfolio'
+import { PROJECT } from './portfolio'
 
 /**
  * Shared shell for the public legal pages (Terms, Privacy). Themeable (light/
@@ -57,14 +57,14 @@ export default function LegalLayout({ title, updated, intro, sections = [] }) {
 
           <div className="mt-12 rounded-2xl border border-zinc-200/80 bg-white/60 p-5 text-sm lp-sub dark:border-white/10 dark:bg-white/[0.03]">
             This project is an academic / portfolio demonstration of Retrieval-Augmented Generation. Questions? Email{' '}
-            <a href={`mailto:${PROFILE.email}`} className="font-semibold text-primary-600 hover:underline dark:text-primary-400">{PROFILE.email}</a>.
+            <a href={`mailto:${PROJECT.email}`} className="font-semibold text-primary-600 hover:underline dark:text-primary-400">{PROJECT.email}</a>.
           </div>
         </motion.div>
       </main>
 
       <footer className="border-t border-zinc-200/70 px-5 py-8 dark:border-white/10 sm:px-8">
         <div className="mx-auto flex max-w-3xl flex-col items-center justify-between gap-3 text-xs lp-sub sm:flex-row">
-          <p>© {new Date().getFullYear()} {PROFILE.name}. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} {PROJECT.name} — {PROJECT.type}. All rights reserved.</p>
           <div className="flex gap-4">
             <Link to="/privacy" className="transition-colors hover:text-primary-600 dark:hover:text-primary-300">Privacy</Link>
             <Link to="/terms" className="transition-colors hover:text-primary-600 dark:hover:text-primary-300">Terms</Link>

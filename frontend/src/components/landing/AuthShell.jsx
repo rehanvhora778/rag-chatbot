@@ -5,7 +5,7 @@ import { ArrowLeft, ShieldCheck, Quote, Search, GraduationCap } from 'lucide-rea
 import AuroraBackground from '../ui/AuroraBackground'
 import ParticleBackground from '../ui/ParticleBackground'
 import { Logo, ThemeToggle } from './common'
-import { PROFILE } from './portfolio'
+import { PROJECT, TEAM_NAMES } from './portfolio'
 import { cn } from '../../lib/utils'
 
 const PANEL_FEATURES = [
@@ -34,7 +34,7 @@ export function AuthShell({ heading, subheading, children }) {
             className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-1.5 text-xs font-semibold tracking-wide text-zinc-200 backdrop-blur-xl"
           >
             <GraduationCap size={14} className="text-primary-300" />
-            Final Year Project · Retrieval-Augmented Generation
+            Project · Retrieval-Augmented Generation
           </motion.div>
           <motion.h2
             initial={{ opacity: 0, y: 20 }}
@@ -75,12 +75,12 @@ export function AuthShell({ heading, subheading, children }) {
           transition={{ delay: 0.6, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           className="relative z-10 rounded-2xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-xl"
         >
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-primary-300">Final Year Project</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-primary-300">Project</p>
           <p className="mt-1.5 text-sm leading-relaxed text-zinc-200">
             A Retrieval-Augmented Generation chatbot, designed &amp; built by{' '}
-            <span className="font-semibold text-white">{PROFILE.name}</span>.
+            <span className="font-semibold text-white">{TEAM_NAMES}</span>.
           </p>
-          <p className="mt-1 text-xs text-zinc-400">{PROFILE.university}</p>
+          <p className="mt-1 text-xs text-zinc-400">{PROJECT.college}</p>
         </motion.div>
       </div>
 

@@ -1,6 +1,7 @@
 import { UploadCloud, FileText, Scissors, Boxes, Database, Search, Send, Sparkles, Quote, Workflow } from 'lucide-react'
 import { Section, Container, SectionHeading } from './common'
 import Reveal from '../ui/Reveal'
+import SiteFooter from './SiteFooter'
 
 const STEPS = [
   { icon: UploadCloud, title: 'Upload Document',   desc: 'PDFs, DOCX, slides, spreadsheets and more.' },
@@ -16,8 +17,9 @@ const STEPS = [
 
 export default function HowItWorks() {
   return (
-    <Section id="how-rag">
-      <Container>
+    <Section id="how-rag" className="justify-between pb-0">
+      <div className="flex w-full flex-1 flex-col justify-center">
+        <Container>
         <SectionHeading
           eyebrow="How RAG Works"
           eyebrowIcon={Workflow}
@@ -43,7 +45,13 @@ export default function HowItWorks() {
             </Reveal>
           ))}
         </div>
-      </Container>
+        </Container>
+      </div>
+
+      {/* footer lives in the last viewport; break out of the section's x-padding */}
+      <div className="-mx-5 sm:-mx-8">
+        <SiteFooter />
+      </div>
     </Section>
   )
 }

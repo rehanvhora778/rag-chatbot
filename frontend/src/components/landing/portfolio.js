@@ -1,23 +1,28 @@
 /**
- * Central portfolio config — EDIT THESE.
+ * Central project config — EDIT THESE.
  *
- * Everything a recruiter-facing portfolio needs to point at lives here so you
- * can update it in one place. Items marked TODO are placeholders.
+ * Everything the college-facing landing page shows lives here so the whole
+ * group can be updated in one place. Items marked TODO are placeholders.
  */
-export const PROFILE = {
-  name: 'Rayhan Vora',
-  role: 'AI & Data Science Student',
-  university: 'L.J. University',
-  tagline: 'Building production-ready Generative AI applications.',
-  email: 'rehanvhora86@gmail.com',
-  github: 'https://github.com/your-username',          // TODO
-  linkedin: 'https://linkedin.com/in/your-handle',     // TODO
-  portfolio: 'https://your-portfolio.dev',             // TODO
-  resume: '/resume.pdf',                               // TODO: drop resume.pdf in /public
+export const PROJECT = {
+  name: 'Nexus RAG',
+  type: 'Project',
+  college: 'L.J. University',
+  department: 'AI & Data Science',      // TODO: your department / course name
+  email: 'rehanvhora86@gmail.com',      // contact shown on legal pages
 }
 
-// Repository for this project (used by hero + GitHub section)
-export const REPO_URL = 'https://github.com/your-username/rag-chatbot' // TODO
+// Group members shown in the "Our Team" section — EDIT names, IDs and roles.
+export const TEAM = [
+  { name: 'Rayhan Vora',  enrollment: 'Enrollment No. TODO', role: 'Backend & RAG Pipeline' },
+  { name: 'Member Two',   enrollment: 'Enrollment No. TODO', role: 'Frontend Development' },   // TODO
+  { name: 'Member Three', enrollment: 'Enrollment No. TODO', role: 'Database & Testing' },     // TODO
+  { name: 'Member Four',  enrollment: 'Enrollment No. TODO', role: 'Documentation & Research' }, // TODO
+]
+
+// "Rayhan, Two, Three & Four" — used on the auth brand panel.
+export const TEAM_NAMES = TEAM.map(m => m.name.split(' ')[0])
+  .reduce((acc, n, i, arr) => (i === 0 ? n : i === arr.length - 1 ? `${acc} & ${n}` : `${acc}, ${n}`), '')
 
 // Where "Launch Application" sends a logged-out visitor
 export const APP_ENTRY = '/register'

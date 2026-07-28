@@ -5,9 +5,6 @@ import Features from '../components/landing/Features'
 import LiveDemo from '../components/landing/LiveDemo'
 import TechStack from '../components/landing/TechStack'
 import HowItWorks from '../components/landing/HowItWorks'
-import AboutDeveloper from '../components/landing/AboutDeveloper'
-import GithubSection from '../components/landing/GithubSection'
-import Contact from '../components/landing/Contact'
 
 export default function LandingPage() {
   // Enable one-section-per-screen scroll-snap only while the landing is mounted.
@@ -25,9 +22,6 @@ export default function LandingPage() {
         <LiveDemo />
         <TechStack />
         <HowItWorks />
-        <AboutDeveloper />
-        <GithubSection />
-        <Contact />
       </main>
     </div>
   )

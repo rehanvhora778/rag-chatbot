@@ -1,14 +1,14 @@
 import { useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, useMotionValue, useSpring, useTransform, useReducedMotion } from 'framer-motion'
-import { Rocket, Github, Terminal } from 'lucide-react'
+import { Rocket, Terminal } from 'lucide-react'
 import AnimatedButton from '../ui/AnimatedButton'
 import AuroraBackground from '../ui/AuroraBackground'
 import ParticleBackground from '../ui/ParticleBackground'
 import RagPipeline from './RagPipeline'
 import { Container } from './common'
 import { useAuth } from '../../contexts/AuthContext'
-import { REPO_URL, APP_ENTRY } from './portfolio'
+import { APP_ENTRY } from './portfolio'
 
 const HEADLINE = ['AI-Powered', 'Document']
 const TECH = ['React', 'Python', 'Django', 'MongoDB', 'FAISS', 'Groq', 'Llama 3.3', 'JWT', 'Tailwind CSS', 'Sentence Transformers']
@@ -100,14 +100,6 @@ export default function Hero() {
           >
             <AnimatedButton size="lg" className="w-full sm:w-auto" onClick={() => navigate(user ? '/dashboard' : APP_ENTRY)}>
               <Rocket size={17} /> Launch Application
-            </AnimatedButton>
-            <AnimatedButton
-              size="lg"
-              variant="secondary"
-              className="w-full border-zinc-200 bg-white/80 text-zinc-700 hover:bg-white hover:text-zinc-900 dark:border-white/10 dark:bg-white/5 dark:text-zinc-200 dark:hover:bg-white/10 sm:w-auto"
-              onClick={() => window.open(REPO_URL, '_blank', 'noopener,noreferrer')}
-            >
-              <Github size={17} /> View GitHub Repository
             </AnimatedButton>
           </motion.div>
 
