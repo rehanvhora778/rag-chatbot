@@ -1,11 +1,14 @@
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
-import { Eye, EyeOff, User, AtSign, Mail, Lock, ArrowRight, CheckCircle2 } from 'lucide-react'
+import { Eye, EyeOff, User, AtSign, Mail, Lock, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import AnimatedButton from '../components/ui/AnimatedButton'
 import { AuthShell, Field } from '../components/landing/AuthShell'
+import { cn } from '../lib/utils'
+
+const AGREE_ERROR = 'Please accept the Terms & Privacy Policy to create your account'
 
 const STRENGTH = ['Too short', 'Weak', 'Fair', 'Good', 'Strong']
 const STRENGTH_COLOR = ['bg-zinc-300 dark:bg-white/15', 'bg-red-500', 'bg-amber-500', 'bg-sky-500', 'bg-emerald-500']
@@ -79,6 +82,8 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState({})
   const [success, setSuccess] = useState(false)
+  // bumped on every failed submit so the consent row re-plays its shake
+  const [agreeShake, setAgreeShake] = useState(0)
 
   const firstName = useMemo(() => form.fullName.trim().split(/\s+/)[0] || '', [form.fullName])
 
@@ -96,7 +101,12 @@ export default function RegisterPage() {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = 'Enter a valid email'
     if (form.password.length < 8) e.password = 'At least 8 characters'
     if (form.password !== form.password2) e.password2 = 'Passwords do not match'
-    if (!agree) e.agree = 'Please accept the terms to continue'
+    if (!agree) {
+      // Easiest error on the form to overlook, so it also shakes and toasts.
+      e.agree = AGREE_ERROR
+      setAgreeShake(n => n + 1)
+      toast.error('Please accept the Terms & Privacy Policy to continue')
+    }
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -159,15 +169,49 @@ export default function RegisterPage() {
         />
         <Field label="Confirm password" icon={Lock} type="password" placeholder="Re-enter your password" autoComplete="new-password" value={form.password2} onChange={set('password2')} error={errors.password2} />
 
-        <label className="flex cursor-pointer items-start gap-2.5 text-sm lp-sub">
-          <input type="checkbox" checked={agree} onChange={e => { setAgree(e.target.checked); if (errors.agree) setErrors(p => ({ ...p, agree: undefined })) }} className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-primary-600 accent-primary-600 dark:border-white/20" />
-          <span>
-            I agree to the{' '}
-            <a href="/terms" target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="font-semibold text-primary-600 hover:underline dark:text-primary-400">Terms</a>{' '}and{' '}
-            <a href="/privacy" target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="font-semibold text-primary-600 hover:underline dark:text-primary-400">Privacy Policy</a>
-          </span>
-        </label>
-        {errors.agree && <p className="-mt-2 text-xs font-medium text-red-500">{errors.agree}</p>}
+        <div>
+          <motion.label
+            key={agreeShake}
+            animate={agreeShake ? { x: [0, -8, 8, -6, 6, -2, 0] } : undefined}
+            transition={{ duration: 0.45, ease: 'easeInOut' }}
+            className={cn(
+              'flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 text-sm transition-colors duration-200 lp-sub',
+              errors.agree
+                ? 'border-red-500/60 bg-red-500/[0.07]'
+                : 'border-transparent hover:border-zinc-200 dark:hover:border-white/10',
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={agree}
+              onChange={e => { setAgree(e.target.checked); if (errors.agree) setErrors(p => ({ ...p, agree: undefined })) }}
+              className={cn(
+                'mt-0.5 h-4 w-4 rounded text-primary-600 accent-primary-600',
+                errors.agree ? 'border-red-500 ring-2 ring-red-500/30' : 'border-zinc-300 dark:border-white/20',
+              )}
+            />
+            <span>
+              I agree to the{' '}
+              <a href="/terms" target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="font-semibold text-primary-600 hover:underline dark:text-primary-400">Terms</a>{' '}and{' '}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="font-semibold text-primary-600 hover:underline dark:text-primary-400">Privacy Policy</a>
+            </span>
+          </motion.label>
+
+          <AnimatePresence>
+            {errors.agree && (
+              <motion.p
+                initial={{ opacity: 0, height: 0, y: -4 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -4 }}
+                transition={{ duration: 0.2 }}
+                className="flex items-start gap-1.5 overflow-hidden pl-3 pt-1.5 text-xs font-medium text-red-500"
+              >
+                <AlertCircle size={13} className="mt-px shrink-0" />
+                {errors.agree}
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </div>
 
         <AnimatedButton type="submit" loading={loading} className="w-full py-3" size="lg">
           {!loading && <>Create Account <ArrowRight size={16} /></>}

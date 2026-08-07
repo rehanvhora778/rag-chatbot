@@ -1,4 +1,4 @@
-import { Atom, Wind, Code2, Server, Database, Boxes, Binary, Zap, Cpu, KeyRound, Container, Layers3 } from 'lucide-react'
+import { Atom, Wind, Code2, Server, Database, Boxes, Zap, Cpu, KeyRound, Layers3 } from 'lucide-react'
 import { Section, Container as Wrap, SectionHeading } from './common'
 import Reveal from '../ui/Reveal'
 
@@ -9,11 +9,9 @@ const TECH = [
   { icon: Server,    name: 'Django REST',   purpose: 'REST API layer',       category: 'Backend',    g: 'from-emerald-500 to-green-600' },
   { icon: Database,  name: 'MongoDB',       purpose: 'Document data store',  category: 'Database',   g: 'from-green-500 to-emerald-600' },
   { icon: Boxes,     name: 'FAISS',         purpose: 'Vector search',        category: 'Retrieval',  g: 'from-violet-500 to-purple-600' },
-  { icon: Binary,    name: 'Sentence-Tx',   purpose: 'Text embeddings',      category: 'Embeddings', g: 'from-fuchsia-500 to-pink-600' },
   { icon: Zap,       name: 'Groq',          purpose: 'LLM inference',        category: 'Inference',  g: 'from-amber-500 to-orange-600' },
   { icon: Cpu,       name: 'Llama 3.3 70B', purpose: 'Generation model',     category: 'Model',      g: 'from-primary-500 to-accent-600' },
   { icon: KeyRound,  name: 'JWT',           purpose: 'Auth & sessions',      category: 'Security',   g: 'from-rose-500 to-red-600' },
-  { icon: Container, name: 'Docker',        purpose: 'Containerization',     category: 'DevOps',     g: 'from-sky-500 to-blue-600', soon: true },
 ]
 
 export default function TechStack() {
@@ -35,12 +33,7 @@ export default function TechStack() {
                   <t.icon size={18} />
                 </span>
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <h3 className="truncate font-display text-sm font-semibold lp-h">{t.name}</h3>
-                    {t.soon && (
-                      <span className="rounded-full bg-zinc-200 px-1.5 text-[8px] font-bold uppercase text-zinc-500 dark:bg-white/10 dark:text-zinc-400">Soon</span>
-                    )}
-                  </div>
+                  <h3 className="truncate font-display text-sm font-semibold lp-h">{t.name}</h3>
                   <p className="truncate text-xs lp-sub">{t.purpose}</p>
                 </div>
               </div>

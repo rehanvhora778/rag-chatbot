@@ -7,7 +7,7 @@ const STEPS = [
   { icon: UploadCloud, title: 'Upload Document',   desc: 'PDFs, DOCX, slides, spreadsheets and more.' },
   { icon: FileText,    title: 'Extract Text',      desc: 'Parse text, with OCR fallback for scans.' },
   { icon: Scissors,    title: 'Split into Chunks', desc: 'Overlapping, semantically coherent chunks.' },
-  { icon: Boxes,       title: 'Create Embeddings', desc: 'Encode chunks with Sentence Transformers.' },
+  { icon: Boxes,       title: 'Create Embeddings', desc: 'Encode each chunk into a semantic vector.' },
   { icon: Database,    title: 'Store in FAISS',    desc: 'Index vectors for fast similarity search.' },
   { icon: Search,      title: 'Search Chunks',     desc: 'Embed the query, retrieve the top-k matches.' },
   { icon: Send,        title: 'Send Context',      desc: 'Inject retrieved context into the prompt.' },

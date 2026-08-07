@@ -1,5 +1,5 @@
 import {
-  Files, Search, Layers, Quote, Zap, History, NotebookPen, Languages, ShieldCheck, Component,
+  Files, Search, Layers, Quote, Zap, History, NotebookPen, ShieldCheck, Component,
 } from 'lucide-react'
 import { Section, Container, SectionHeading } from './common'
 import Reveal from '../ui/Reveal'
@@ -12,7 +12,6 @@ const FEATURES = [
   { icon: Zap,         title: 'Streaming Responses',  desc: 'Tokens stream in real time from Groq for instant feedback.',              g: 'from-amber-500 to-orange-600' },
   { icon: NotebookPen, title: 'AI Summaries',         desc: 'Generate structured summaries of long documents on demand.',              g: 'from-fuchsia-500 to-pink-600' },
   { icon: History,     title: 'Conversation History', desc: 'Sessions are persisted so you can resume any chat where you left off.',   g: 'from-rose-500 to-pink-600' },
-  { icon: Languages,   title: 'Multilingual Support', desc: 'Ask and answer across multiple languages without losing nuance.',         g: 'from-cyan-500 to-sky-600' },
   { icon: ShieldCheck, title: 'Authentication',       desc: "JWT-secured accounts keep each user's documents and chats isolated.",     g: 'from-green-500 to-emerald-600' },
 ]
 

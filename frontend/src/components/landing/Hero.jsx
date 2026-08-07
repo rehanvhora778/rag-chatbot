@@ -11,7 +11,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { APP_ENTRY } from './portfolio'
 
 const HEADLINE = ['AI-Powered', 'Document']
-const TECH = ['React', 'Python', 'Django', 'MongoDB', 'FAISS', 'Groq', 'Llama 3.3', 'JWT', 'Tailwind CSS', 'Sentence Transformers']
+const TECH = ['React', 'Python', 'Django', 'MongoDB', 'FAISS', 'Groq', 'Llama 3.3', 'JWT', 'Tailwind CSS']
 
 export default function Hero() {
   const navigate = useNavigate()
@@ -87,9 +87,8 @@ export default function Hero() {
             className="mx-auto mt-6 max-w-xl text-base leading-relaxed lp-sub sm:text-lg lg:mx-0"
           >
             Upload documents and ask questions in natural language using Retrieval-Augmented Generation —
-            powered by <span className="font-semibold lp-h">Llama 3.3</span>,{' '}
-            <span className="font-semibold lp-h">FAISS</span> and{' '}
-            <span className="font-semibold lp-h">Sentence Transformers</span>.
+            powered by <span className="font-semibold lp-h">Llama 3.3</span> and{' '}
+            <span className="font-semibold lp-h">FAISS</span>.
           </motion.p>
 
           <motion.div
