@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     ChatSessionListView, ChatSessionDetailView,
-    SendMessageView, ChatSearchView, ExportChatPDFView,
+    SendMessageView, ChatSearchView, ExportChatPDFView, ChatConfigView,
 )
 
 urlpatterns = [
@@ -10,4 +10,5 @@ urlpatterns = [
     path('sessions/<str:session_id>/message/',  SendMessageView.as_view(),       name='chat_send_message'),
     path('sessions/<str:session_id>/export/',   ExportChatPDFView.as_view(),     name='chat_export_pdf'),
     path('search/',                             ChatSearchView.as_view(),        name='chat_search'),
+    path('config/',                             ChatConfigView.as_view(),        name='chat_config'),
 ]

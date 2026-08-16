@@ -5,6 +5,8 @@ from django.utils import timezone
 from datetime import timedelta
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
+# aliased: `status` is used as a local variable for document filtering below
+from rest_framework import status as status_codes
 
 from core.mongo import documents_col, chat_sessions_col, messages_col, analytics_col
 from core.permissions import IsAdminUser
@@ -143,13 +145,29 @@ class AdminUserDetailView(APIView):
         except User.DoesNotExist:
             return APIResponse.not_found('User not found.')
 
-        if str(user_id) == str(request.user.id) and 'is_active' in request.data and not request.data['is_active']:
-            return APIResponse.error('You cannot disable your own account.')
+        is_self = str(user_id) == str(request.user.id)
+
+        # Locking yourself out is never what you meant to do.
+        if is_self and request.data.get('is_active') is False:
+            return APIResponse.error('You cannot deactivate your own account.')
+        if is_self and request.data.get('is_staff') is False:
+            return APIResponse.error('You cannot remove your own admin access.')
+
+        # Only a superuser may touch another superuser, or hand out superuser rights.
+        if u.is_superuser and not is_self and not request.user.is_superuser:
+            return APIResponse.error('Only a superuser can modify another superuser.',
+                                     status_code=status_codes.HTTP_403_FORBIDDEN)
+        if 'is_superuser' in request.data and not request.user.is_superuser:
+            return APIResponse.error('Only a superuser can change superuser rights.',
+                                     status_code=status_codes.HTTP_403_FORBIDDEN)
 
         if 'is_active'    in request.data: u.is_active    = bool(request.data['is_active'])
         if 'is_staff'     in request.data: u.is_staff     = bool(request.data['is_staff'])
         if 'is_superuser' in request.data: u.is_superuser = bool(request.data['is_superuser'])
         u.save()
+
+        logger.info("Admin %s updated user %s -> active=%s staff=%s superuser=%s",
+                    request.user.email, u.email, u.is_active, u.is_staff, u.is_superuser)
 
         return APIResponse.success(data={
             'id': u.id, 'username': u.username,
@@ -162,6 +180,10 @@ class AdminUserDetailView(APIView):
             u = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return APIResponse.not_found('User not found.')
+
+        if u.is_superuser and u.id != request.user.id and not request.user.is_superuser:
+            return APIResponse.error('Only a superuser can delete another superuser.',
+                                     status_code=status_codes.HTTP_403_FORBIDDEN)
 
         documents_col().delete_many({'user_id': u.id})
         chat_sessions_col().delete_many({'user_id': u.id})

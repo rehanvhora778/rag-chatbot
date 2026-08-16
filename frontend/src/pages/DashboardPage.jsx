@@ -2,92 +2,63 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import CountUp from 'react-countup'
+import {
+  FileText, MessageSquare, Search, Upload, ArrowUpRight,
+  Sparkles, Plus, BookOpen,
+} from 'lucide-react'
+import toast from 'react-hot-toast'
+
 import { analyticsAPI } from '../api/analytics'
 import { useAuth } from '../contexts/AuthContext'
-import { FileText, MessageSquare, Search, Upload, ArrowUpRight, Zap, Sparkles } from 'lucide-react'
-import GradientBorderCard from '../components/ui/GradientBorderCard'
-import GlassCard from '../components/ui/GlassCard'
-import SpotlightCard from '../components/ui/SpotlightCard'
-import ParticleBackground from '../components/ui/ParticleBackground'
-import Reveal from '../components/ui/Reveal'
+import Logo from '../components/ui/Logo'
+import EmptyState from '../components/ui/EmptyState'
+import AnimatedButton from '../components/ui/AnimatedButton'
 import { SkeletonStatCard } from '../components/ui/LoadingSkeleton'
-import toast from 'react-hot-toast'
+
+const container = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } }
+const item = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] } } }
+
+const statusStyle = {
+  completed:  'bg-success-500/[0.12] text-success-400',
+  processing: 'bg-primary-500/[0.12] text-primary-300',
+  pending:    'bg-white/[0.05] text-zinc-400',
+  failed:     'bg-red-500/[0.12] text-red-400',
+}
 
 function DashboardSkeleton() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div className="card h-28 shimmer relative overflow-hidden" />
+      <div className="card shimmer relative h-32 overflow-hidden" />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[0, 1, 2].map(i => <SkeletonStatCard key={i} />)}
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="card h-20 shimmer relative overflow-hidden" />
-        <div className="card h-20 shimmer relative overflow-hidden" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {[0, 1, 2].map(i => <div key={i} className="card shimmer relative h-20 overflow-hidden" />)}
       </div>
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <div className="card h-48 shimmer relative overflow-hidden" />
-        <div className="card h-48 shimmer relative overflow-hidden" />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="card shimmer relative h-48 overflow-hidden" />
+        <div className="card shimmer relative h-48 overflow-hidden" />
       </div>
     </div>
   )
 }
 
-const statusStyle = {
-  completed:  'bg-success-500/15 text-success-400',
-  processing: 'bg-amber-500/15 text-amber-400',
-  pending:    'bg-white/5 text-zinc-400',
-  failed:     'bg-red-500/15 text-red-400',
-}
-
-const container = { hidden: {}, show: { transition: { staggerChildren: 0.07 } } }
-const item = { hidden: { opacity: 0, y: 18 }, show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] } } }
-
-function StatCard({ label, value, icon: Icon, gradient }) {
+function StatCard({ label, value, icon: Icon, to }) {
   return (
     <motion.div variants={item}>
-      <GradientBorderCard innerClassName="p-5">
-        <div className="flex items-center gap-4">
-          <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${gradient} shadow-glow-sm`}>
-            <Icon size={20} className="text-white" />
-          </div>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">{label}</p>
-            <p className="mt-0.5 font-display text-2xl font-bold tabular-nums text-white">
-              <CountUp end={value ?? 0} duration={1.4} separator="," />
-            </p>
-          </div>
-        </div>
-      </GradientBorderCard>
+      <Link to={to} className="surface-gold spotlight-card group flex items-center gap-4 p-5 transition-transform duration-200 hover:-translate-y-0.5">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500/20 to-accent-600/10 ring-1 ring-primary-500/20">
+          <Icon size={20} className="text-primary-400" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{label}</span>
+          <span className="mt-0.5 block font-display text-2xl font-bold tabular-nums text-white">
+            <CountUp end={value ?? 0} duration={1.3} separator="," />
+          </span>
+        </span>
+        <ArrowUpRight size={15} className="ml-auto shrink-0 text-zinc-700 transition-colors group-hover:text-primary-400" />
+      </Link>
     </motion.div>
-  )
-}
-
-function DocRow({ doc }) {
-  return (
-    <div className="flex items-center justify-between py-2.5">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-500/10">
-          <FileText size={13} className="text-primary-400" />
-        </div>
-        <span className="truncate text-sm text-zinc-300">{doc.original_filename}</span>
-      </div>
-      <span className={`badge ml-3 shrink-0 ${statusStyle[doc.status] || ''}`}>{doc.status}</span>
-    </div>
-  )
-}
-
-function SessionRow({ session }) {
-  return (
-    <Link to={`/chat/${session.id}`} className="group flex items-center gap-3 py-2.5">
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent-500/10">
-        <MessageSquare size={13} className="text-accent-400" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-zinc-300 transition-colors group-hover:text-primary-300">{session.title}</p>
-        <p className="text-xs text-zinc-600">{session.message_count} messages</p>
-      </div>
-      <ArrowUpRight size={13} className="shrink-0 text-zinc-700 transition-colors group-hover:text-primary-400" />
-    </Link>
   )
 }
 
@@ -99,115 +70,143 @@ export default function DashboardPage() {
   useEffect(() => {
     analyticsAPI.getDashboard()
       .then(res => setData(res.data.data))
-      .catch(() => toast.error('Failed to load dashboard.'))
+      .catch(() => toast.error('Could not load your dashboard.'))
       .finally(() => setLoading(false))
   }, [])
 
   if (loading) return <DashboardSkeleton />
 
+  const stats = data?.stats || {}
+  const isNew = !stats.total_documents
+
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="mx-auto max-w-5xl space-y-6">
-      {/* Welcome banner */}
-      <motion.div variants={item}>
-        <GlassCard className="relative flex items-center justify-between gap-4 overflow-hidden p-6">
-          <ParticleBackground count={14} className="opacity-70" />
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{ background: 'radial-gradient(ellipse 60% 120% at 85% 50%, rgba(139,92,246,0.14), transparent 70%)' }}
-          />
-          <div className="relative">
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full border border-primary-500/30 bg-primary-500/10 px-2.5 py-0.5 text-[11px] font-medium text-primary-300">
-              <Sparkles size={11} /> AI Workspace
-            </div>
-            <h2 className="font-display text-2xl font-bold text-white">
-              Welcome back, <span className="text-gradient-animated">{user?.full_name?.split(' ')[0] || user?.username}</span>
+    <motion.div variants={container} initial="hidden" animate="show" className="mx-auto max-w-5xl space-y-6 pb-4">
+      {/* Welcome */}
+      <motion.div variants={item} className="surface-gold relative overflow-hidden p-5 sm:p-6">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: 'radial-gradient(ellipse 55% 130% at 88% 45%, rgba(212,175,55,0.16), transparent 68%)' }}
+        />
+        <div className="relative flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <span className="chip mb-2"><Sparkles size={11} /> AI Workspace</span>
+            <h2 className="font-display text-xl font-bold text-white sm:text-2xl">
+              Welcome back,{' '}
+              <span className="text-gradient-animated">{user?.full_name?.split(' ')[0] || user?.username}</span>
             </h2>
-            <p className="mt-1 text-sm text-zinc-400">Here&apos;s an overview of your knowledge base.</p>
+            <p className="mt-1 text-[13px] text-zinc-400">Here&apos;s an overview of your knowledge base.</p>
           </div>
           <motion.div
             animate={{ y: [0, -6, 0] }}
-            transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
-            className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-accent-600 shadow-glow"
+            transition={{ duration: 3.6, repeat: Infinity, ease: 'easeInOut' }}
+            className="hidden shrink-0 sm:block"
           >
-            <Zap size={24} className="text-white" />
+            <Logo size={56} id="dash" />
           </motion.div>
-        </GlassCard>
+        </div>
       </motion.div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Documents" value={data?.stats?.total_documents} icon={FileText}      gradient="bg-gradient-to-br from-primary-500 to-accent-600" />
-        <StatCard label="Chat Sessions"   value={data?.stats?.total_sessions}  icon={MessageSquare} gradient="bg-gradient-to-br from-accent-500 to-violet-600" />
-        <StatCard label="Total Queries"   value={data?.stats?.total_queries}   icon={Search}        gradient="bg-gradient-to-br from-success-500 to-teal-600" />
-      </div>
+      {isNew ? (
+        <motion.div variants={item} className="surface-gold">
+          <EmptyState
+            icon={BookOpen}
+            title="Build Your Knowledge Base"
+            description="Upload PDFs and start asking questions about your documents."
+            actions={
+              <>
+                <Link to="/documents"><AnimatedButton><Upload size={14} /> Upload Document</AnimatedButton></Link>
+                <a href="https://research.ibm.com/blog/retrieval-augmented-generation-RAG" target="_blank" rel="noopener noreferrer">
+                  <AnimatedButton variant="secondary">Learn How RAG Works</AnimatedButton>
+                </a>
+              </>
+            }
+          />
+        </motion.div>
+      ) : (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <StatCard label="Documents"     value={stats.total_documents} icon={FileText}      to="/documents" />
+            <StatCard label="Chat Sessions" value={stats.total_sessions}  icon={MessageSquare} to="/chat" />
+            <StatCard label="Questions"     value={stats.total_queries}   icon={Search}        to="/analytics" />
+          </div>
 
-      {/* Quick actions */}
-      <div className="grid grid-cols-2 gap-4">
-        {[
-          { to: '/documents', icon: Upload, iconWrap: 'bg-primary-500/10', iconColor: 'text-primary-400', title: 'Upload Document', sub: 'PDF, DOCX, or TXT' },
-          { to: '/chat', icon: MessageSquare, iconWrap: 'bg-accent-500/10', iconColor: 'text-accent-400', title: 'Start New Chat', sub: 'Ask anything' },
-        ].map(({ to, icon: Icon, iconWrap, iconColor, title, sub }) => (
-          <motion.div variants={item} key={to}>
-            <Link to={to}>
-              <SpotlightCard className="flex items-center gap-4 p-5">
-                <motion.div
-                  whileHover={{ rotate: 8, scale: 1.08 }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 12 }}
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${iconWrap}`}
-                >
-                  <Icon size={18} className={iconColor} />
-                </motion.div>
-                <div>
-                  <p className="text-sm font-semibold text-white">{title}</p>
-                  <p className="mt-0.5 text-xs text-zinc-500">{sub}</p>
+          {/* Quick actions */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {[
+              { to: '/chat?new=1', icon: Plus,   title: 'Start New Chat',  sub: 'Ask across your documents' },
+              { to: '/documents',  icon: Upload, title: 'Upload Document', sub: 'PDF, DOCX or TXT' },
+            ].map(({ to, icon: Icon, title, sub }) => (
+              <motion.div variants={item} key={to}>
+                <Link to={to} className="spotlight-card group flex items-center gap-3.5 rounded-2xl border border-white/[0.06] bg-ink-800/60 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary-500/30">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 ring-1 ring-primary-500/20 transition-transform duration-200 group-hover:scale-110">
+                    <Icon size={17} className="text-primary-400" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[13px] font-semibold text-white">{title}</span>
+                    <span className="mt-0.5 block truncate text-[11px] text-zinc-500">{sub}</span>
+                  </span>
+                  <ArrowUpRight size={15} className="ml-auto shrink-0 text-zinc-700 transition-colors group-hover:text-primary-400" />
+                </Link>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Recent */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <motion.div variants={item} className="surface-gold p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-white">Recent Documents</h3>
+                <Link to="/documents" className="text-[11px] font-semibold text-primary-400 hover:text-primary-300">View all</Link>
+              </div>
+              {data?.recent_documents?.length ? (
+                <div className="divide-y divide-white/[0.05]">
+                  {data.recent_documents.map(d => (
+                    <div key={d.id} className="flex items-center justify-between gap-3 py-2.5">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-500/10">
+                          <FileText size={12} className="text-primary-400" />
+                        </span>
+                        <span className="truncate text-[13px] text-zinc-300">{d.original_filename}</span>
+                      </div>
+                      <span className={`badge shrink-0 ${statusStyle[d.status] || ''}`}>{d.status}</span>
+                    </div>
+                  ))}
                 </div>
-                <ArrowUpRight size={16} className="ml-auto text-zinc-600 transition-colors group-hover:text-primary-400" />
-              </SpotlightCard>
-            </Link>
-          </motion.div>
-        ))}
-      </div>
+              ) : (
+                <p className="py-8 text-center text-[13px] text-zinc-500">No documents yet.</p>
+              )}
+            </motion.div>
 
-      {/* Recent */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <Reveal>
-          <GlassCard className="p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white">Recent Documents</h3>
-              <Link to="/documents" className="text-xs font-medium text-primary-400 hover:underline">View all</Link>
-            </div>
-            {data?.recent_documents?.length ? (
-              <div className="divide-y divide-white/[0.05]">
-                {data.recent_documents.map(d => <DocRow key={d.id} doc={d} />)}
+            <motion.div variants={item} className="surface-gold p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-white">Recent Chats</h3>
+                <Link to="/chat" className="text-[11px] font-semibold text-primary-400 hover:text-primary-300">View all</Link>
               </div>
-            ) : (
-              <div className="py-8 text-center">
-                <FileText size={28} className="mx-auto mb-2 text-zinc-700" />
-                <p className="text-sm text-zinc-500">No documents yet. Upload one!</p>
-              </div>
-            )}
-          </GlassCard>
-        </Reveal>
-
-        <Reveal delay={0.08}>
-          <GlassCard className="p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white">Recent Chats</h3>
-              <Link to="/chat" className="text-xs font-medium text-primary-400 hover:underline">View all</Link>
-            </div>
-            {data?.recent_sessions?.length ? (
-              <div className="divide-y divide-white/[0.05]">
-                {data.recent_sessions.map(s => <SessionRow key={s.id} session={s} />)}
-              </div>
-            ) : (
-              <div className="py-8 text-center">
-                <MessageSquare size={28} className="mx-auto mb-2 text-zinc-700" />
-                <p className="text-sm text-zinc-500">No chats yet. Start one!</p>
-              </div>
-            )}
-          </GlassCard>
-        </Reveal>
-      </div>
+              {data?.recent_sessions?.length ? (
+                <div className="divide-y divide-white/[0.05]">
+                  {data.recent_sessions.map(s => (
+                    <Link key={s.id} to={`/chat/${s.id}`} className="group flex items-center gap-2.5 py-2.5">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-500/10">
+                        <MessageSquare size={12} className="text-primary-400" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] text-zinc-300 transition-colors group-hover:text-primary-200">{s.title}</span>
+                        <span className="block truncate text-[10px] text-zinc-600">
+                          {s.last_message_preview || `${s.message_count || 0} messages`}
+                        </span>
+                      </span>
+                      <ArrowUpRight size={13} className="shrink-0 text-zinc-700 transition-colors group-hover:text-primary-400" />
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <p className="py-8 text-center text-[13px] text-zinc-500">No chats yet.</p>
+              )}
+            </motion.div>
+          </div>
+        </>
+      )}
     </motion.div>
   )
 }

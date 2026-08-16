@@ -54,6 +54,15 @@ class _OnnxBackend:
         self.input_names = {i.name for i in self.session.get_inputs()}
         self.device = 'DirectML GPU' if 'DmlExecutionProvider' in self.session.get_providers() else 'CPU'
 
+        # One backend instance is shared by every request and every background
+        # upload thread. The DirectML provider is NOT safe to enter from two
+        # threads at once — concurrent run() calls segfault the whole process,
+        # which takes Django down with them (uploading two files at the same
+        # time was enough to trigger it). Inference is therefore serialised.
+        # The GPU is a single resource anyway, so this costs no real throughput:
+        # work is already batched inside each call.
+        self._infer_lock = threading.Lock()
+
     def _encode_batch(self, texts: List[str]):
         import numpy as np
 
@@ -65,7 +74,8 @@ class _OnnxBackend:
             max_length=_MAX_SEQ_LENGTH,
         )
         feeds = {k: v.astype(np.int64) for k, v in enc.items() if k in self.input_names}
-        (hidden,) = self.session.run(None, feeds)
+        with self._infer_lock:
+            (hidden,) = self.session.run(None, feeds)
         mask = enc['attention_mask'][..., None].astype(np.float32)
         emb = (hidden * mask).sum(axis=1) / np.clip(mask.sum(axis=1), 1e-9, None)
         emb /= np.clip(np.linalg.norm(emb, axis=1, keepdims=True), 1e-12, None)
@@ -143,14 +153,48 @@ def get_embedding_model():
                 logger.warning("ONNX embedding backend unavailable (%s) — falling back to torch.", exc)
 
         logger.info("Loading embedding model (torch): %s", model_name)
-        _backend = _TorchBackend(model_name)
+        try:
+            _backend = _TorchBackend(model_name)
+        except ImportError as exc:
+            # Production installs (requirements-prod.txt) leave PyTorch out, so
+            # this fallback simply isn't there. Say so plainly — otherwise the
+            # only clue is a bare "No module named 'sentence_transformers'".
+            raise RuntimeError(
+                f"No embedding backend is available. The ONNX backend failed to load and "
+                f"the PyTorch fallback is not installed ({exc}). On a production install "
+                f"keep EMBEDDING_BACKEND=onnx and check the ONNX error logged above; "
+                f"to use the fallback instead, install sentence-transformers."
+            ) from exc
         logger.info("Embedding model ready on %s.", _backend.device)
         return _backend
+
+
+def ensure_numpy_loaded():
+    """Import numpy on the calling thread, before any worker thread can.
+
+    numpy's package initialisation is not thread-safe the *first* time it runs:
+    its __init__ imports its own submodules, so a second thread importing numpy
+    at that moment sees a half-built module and dies with
+
+        cannot import name 'matrix_power' from partially initialized module
+        'numpy.linalg' (most likely due to a circular import)
+
+    Every heavy dependency here pulls numpy in (onnxruntime, transformers,
+    faiss, PyMuPDF, torch), and both the preload below and document processing
+    run in background threads — so two of them racing to be first is a real
+    possibility. Importing numpy once up front, on the main thread, makes that
+    impossible: by the time any thread starts, sys.modules['numpy'] is complete
+    and every later import is just a dict lookup.
+    """
+    import numpy  # noqa: F401
 
 
 def preload_embedding_model_async():
     """Warm the embedding model in a daemon thread so the first upload or chat
     message doesn't pay the model-load cost."""
+    # Must happen here, on the caller's thread — not inside _load(). See above.
+    ensure_numpy_loaded()
+
     def _load():
         try:
             get_embedding_model()

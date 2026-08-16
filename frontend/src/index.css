@@ -5,7 +5,7 @@
 @tailwind utilities;
 
 /* ──────────────────────────────────────────────────────────────
-   BASE — dark-first premium SaaS
+   BASE — cinematic black with metallic gold light
    ────────────────────────────────────────────────────────────── */
 @layer base {
   html {
@@ -13,49 +13,67 @@
   }
 
   body {
-    @apply font-sans antialiased text-zinc-200;
-    background-color: #030712;
+    @apply font-sans antialiased text-zinc-300;
+    background-color: #050506;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
     -webkit-font-smoothing: antialiased;
+    /* Nothing in the app is wider than the viewport — belt and braces so a
+       stray fixed-width child can never produce a horizontal scrollbar. */
+    overflow-x: hidden;
   }
 
-  /* Fixed aurora wash + Cursor-style top spotlight beam behind the whole app */
+  /* Ambient gold lighting: a broad warm wash from above, two soft rim lights
+     at the corners, and a faint pool at the foot of the page. Low alpha on
+     purpose — gold reads as luxury only while it stays an accent. */
   body::before {
     content: '';
     position: fixed;
     inset: 0;
     z-index: -1;
     background:
-      radial-gradient(ellipse 90% 50% at 50% -20%, rgba(139, 92, 246, 0.16), transparent 60%),
-      radial-gradient(ellipse 60% 50% at 12% 0%,  rgba(139, 92, 246, 0.08), transparent 60%),
-      radial-gradient(ellipse 50% 50% at 92% 8%,  rgba(99, 102, 241, 0.08), transparent 55%),
-      radial-gradient(ellipse 60% 60% at 50% 112%, rgba(16, 185, 129, 0.05), transparent 60%);
+      radial-gradient(ellipse 92% 52% at 50% -18%, rgba(212, 175, 55, 0.13), transparent 62%),
+      radial-gradient(ellipse 55% 45% at 8%  2%,  rgba(245, 197, 66, 0.055), transparent 60%),
+      radial-gradient(ellipse 48% 45% at 94% 10%, rgba(176, 126, 40, 0.065), transparent 58%),
+      radial-gradient(ellipse 65% 55% at 50% 114%, rgba(212, 175, 55, 0.045), transparent 62%);
     pointer-events: none;
   }
 
-  /* Faint fixed grid texture (Cursor/Linear) */
+  /* Faint fixed grid, masked so it only catches the light near the top */
   body::after {
     content: '';
     position: fixed;
     inset: 0;
     z-index: -1;
     background-image:
-      linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
-    background-size: 52px 52px;
-    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent 80%);
-    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent 80%);
+      linear-gradient(rgba(212, 175, 55, 0.030) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(212, 175, 55, 0.030) 1px, transparent 1px);
+    background-size: 54px 54px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent 78%);
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent 78%);
     pointer-events: none;
   }
 
   ::selection {
-    background: rgba(139, 92, 246, 0.35);
+    background: rgba(212, 175, 55, 0.32);
     color: #fff;
   }
 
   :root {
-    --sidebar-width: 256px;
+    --sidebar-width: 272px;
     --navbar-height: 60px;
+    --gold:        #D4AF37;
+    --gold-bright: #F5C542;
+    --gold-soft:   #E8C76A;
+  }
+
+  /* Respect a user's reduced-motion preference across every animation here. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -67,7 +85,7 @@
   /* ── Buttons ── */
   .btn-primary {
     @apply relative inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl
-           bg-gradient-to-br from-primary-500 to-accent-600 text-white font-medium text-sm
+           bg-gradient-to-b from-primary-400 to-primary-600 text-ink-950 font-semibold text-sm
            shadow-glow-sm hover:shadow-glow
            disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none
            transition-all duration-200 focus:outline-none
@@ -76,8 +94,8 @@
 
   .btn-secondary {
     @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl
-           bg-white/5 text-zinc-200 font-medium text-sm border border-white/10
-           hover:bg-white/10 hover:border-white/20 active:bg-white/5
+           bg-white/[0.04] text-zinc-200 font-medium text-sm border border-primary-500/15
+           hover:bg-primary-500/[0.08] hover:border-primary-500/35 active:bg-white/5
            disabled:opacity-50 disabled:cursor-not-allowed
            transition-all duration-200 backdrop-blur-sm;
   }
@@ -92,26 +110,59 @@
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl
            text-zinc-400 font-medium text-sm
-           hover:bg-white/5 hover:text-zinc-100
+           hover:bg-primary-500/[0.07] hover:text-primary-300
            disabled:opacity-50 transition-all duration-150;
   }
 
   /* ── Inputs ── */
   .input-field {
-    @apply w-full px-3.5 py-2.5 rounded-xl border border-white/10 text-sm font-medium
+    @apply w-full px-3.5 py-2.5 rounded-xl border border-white/[0.08] text-sm font-medium
            bg-white/[0.03] text-zinc-100 placeholder-zinc-500
-           focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:border-primary-500/60
+           focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500/55
            disabled:opacity-50 disabled:cursor-not-allowed
            transition-all duration-200 backdrop-blur-sm;
   }
 
-  /* ── Cards ── */
+  /* ── Surfaces ── */
   .card {
     @apply rounded-2xl border border-white/[0.06] bg-ink-800/70 backdrop-blur-xl shadow-card;
   }
 
   .glass {
-    @apply rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-2xl shadow-card;
+    @apply rounded-2xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-2xl shadow-card;
+  }
+
+  /* Panel with a hairline gold top-edge highlight — the signature surface. */
+  .surface-gold {
+    @apply relative rounded-2xl border border-primary-500/30 bg-ink-850/80 backdrop-blur-xl;
+    box-shadow:
+      inset 0 1px 0 rgba(245, 197, 66, 0.10),
+      0 0 26px rgba(212, 175, 55, 0.07),
+      0 8px 32px rgba(0, 0, 0, 0.45);
+  }
+
+  /* The big floating containers: sidebar, chat column, right rail. Same gold
+     rim as the small cards so the whole screen reads as one lit system. */
+  .panel-gold {
+    @apply relative rounded-2xl border border-primary-500/25 bg-ink-900/70 backdrop-blur-xl;
+    box-shadow:
+      inset 0 1px 0 rgba(245, 197, 66, 0.07),
+      0 0 34px rgba(212, 175, 55, 0.06),
+      0 12px 44px rgba(0, 0, 0, 0.55);
+  }
+
+  /* Rows and list items — a permanent faint gold rim that lifts on hover,
+     rather than a border that only appears on interaction. */
+  .row-gold {
+    @apply rounded-xl border border-primary-500/15 bg-primary-500/[0.02] transition-all duration-200;
+  }
+  .row-gold:hover {
+    @apply border-primary-500/40 bg-primary-500/[0.06];
+    box-shadow: 0 0 18px rgba(212, 175, 55, 0.12);
+  }
+  .row-gold-active {
+    @apply border-primary-500/55 bg-primary-500/[0.10];
+    box-shadow: 0 0 22px rgba(212, 175, 55, 0.20);
   }
 
   /* ── Labels ── */
@@ -122,6 +173,11 @@
   /* ── Badges ── */
   .badge {
     @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-primary-500/20
+           bg-primary-500/[0.07] px-2.5 py-1 text-[11px] font-medium text-primary-300;
   }
 
   /* ── Section headers ── */
@@ -138,20 +194,21 @@
    ────────────────────────────────────────────────────────────── */
 @layer utilities {
   .text-gradient {
-    @apply bg-gradient-to-r from-primary-400 via-accent-400 to-primary-400 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-primary-400 via-primary-200 to-primary-500 bg-clip-text text-transparent;
   }
+  /* Brushed-metal headline: a highlight travels across the letterforms. */
   .text-gradient-animated {
-    background: linear-gradient(90deg, #a78bfa, #818cf8, #34d399, #a78bfa);
-    background-size: 300% 100%;
+    background: linear-gradient(110deg, #8E6F20, #D4AF37 22%, #F7E7A8 45%, #F5C542 58%, #D4AF37 78%, #8E6F20);
+    background-size: 260% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    animation: gradientMove 6s ease infinite;
+    animation: gradientMove 7s ease infinite;
   }
   .bg-grid {
     background-image:
-      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      linear-gradient(rgba(212,175,55,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(212,175,55,0.04) 1px, transparent 1px);
     background-size: 44px 44px;
   }
   .mask-fade-b {
@@ -163,8 +220,25 @@
     position: absolute;
     inset: 0;
     transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent);
+    background: linear-gradient(90deg, transparent, rgba(245,197,66,0.09), transparent);
     animation: shimmer 1.8s linear infinite;
+  }
+  /* Horizontal hairline that fades out at both ends. */
+  .rule-gold {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(212,175,55,0.35), transparent);
+  }
+  /* Any wide child (tables, code, diagrams) scrolls inside itself instead of
+     pushing the page sideways. */
+  .scroll-x {
+    @apply overflow-x-auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Opt a container out of the iOS "zoom on focus" behaviour by keeping inputs
+     at >=16px on small screens. Applied to the chat composer. */
+  .no-zoom-input { font-size: 16px; }
+  @screen sm {
+    .no-zoom-input { font-size: 0.875rem; }
   }
 }
 
@@ -172,19 +246,19 @@
 @keyframes shimmer      { 0% { transform: translateX(-100%) } 100% { transform: translateX(100%) } }
 @keyframes gradientMove { 0%,100% { background-position: 0% 50% } 50% { background-position: 100% 50% } }
 
-/* ── Perplexity-style flowing gradient border (used as a 1.5px frame) ── */
+/* ── Flowing gold border (used as a 1.5px frame around the composer) ── */
 .flow-border {
-  background: linear-gradient(120deg, rgba(139,92,246,0.45), rgba(99,102,241,0.45), rgba(16,185,129,0.35), rgba(139,92,246,0.45));
+  background: linear-gradient(120deg, rgba(212,175,55,0.55), rgba(245,197,66,0.35), rgba(176,126,40,0.5), rgba(212,175,55,0.55));
   background-size: 300% 300%;
   animation: gradientMove 9s ease infinite;
   transition: box-shadow 0.3s ease;
 }
 .flow-border:focus-within {
-  box-shadow: 0 0 0 1px rgba(139,92,246,0.4), 0 0 40px rgba(139,92,246,0.28);
+  box-shadow: 0 0 0 1px rgba(212,175,55,0.45), 0 0 40px rgba(212,175,55,0.22);
   animation-duration: 5s;
 }
 
-/* ── Cursor-style card spotlight (component sets --mx / --my on mousemove) ── */
+/* ── Card spotlight (component sets --mx / --my on mousemove) ── */
 .spotlight-card { position: relative; isolation: isolate; }
 .spotlight-card::before {
   content: '';
@@ -192,7 +266,7 @@
   inset: 0;
   z-index: 0;
   border-radius: inherit;
-  background: radial-gradient(440px circle at var(--mx, -200px) var(--my, -200px), rgba(139,92,246,0.16), transparent 60%);
+  background: radial-gradient(440px circle at var(--mx, -200px) var(--my, -200px), rgba(212,175,55,0.14), transparent 60%);
   opacity: 0;
   transition: opacity 0.35s ease;
   pointer-events: none;
@@ -203,16 +277,18 @@
 /* ── Custom scrollbar ── */
 ::-webkit-scrollbar        { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track  { background: transparent; }
-::-webkit-scrollbar-thumb  { background: rgba(139,92,246,0.25); border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(139,92,246,0.45); }
+::-webkit-scrollbar-thumb  { background: rgba(212,175,55,0.22); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(212,175,55,0.42); }
+/* Firefox */
+* { scrollbar-color: rgba(212,175,55,0.28) transparent; scrollbar-width: thin; }
 
-/* ── Markdown prose (chat) — premium, ChatGPT-style typography ── */
-.prose-chat                  { @apply text-[0.9rem] leading-[1.7] text-zinc-200; }
+/* ── Markdown prose (chat) ── */
+.prose-chat                  { @apply text-[0.9rem] leading-[1.7] text-zinc-300; }
 .prose-chat > :first-child   { @apply mt-0; }
 .prose-chat > :last-child    { @apply mb-0; }
 .prose-chat p                { @apply my-2.5 leading-[1.7]; }
-.prose-chat ul               { @apply my-2.5 list-disc space-y-1.5 pl-5 marker:text-primary-400/70; }
-.prose-chat ol               { @apply my-2.5 list-decimal space-y-1.5 pl-5 marker:text-primary-400/70; }
+.prose-chat ul               { @apply my-2.5 list-disc space-y-1.5 pl-5 marker:text-primary-500/80; }
+.prose-chat ol               { @apply my-2.5 list-decimal space-y-1.5 pl-5 marker:text-primary-500/80; }
 .prose-chat li               { @apply leading-[1.65]; }
 .prose-chat li > ul,
 .prose-chat li > ol          { @apply my-1; }
@@ -224,56 +300,70 @@
 .prose-chat h3 + p           { @apply mt-1.5; }
 .prose-chat strong           { @apply font-semibold text-white; }
 .prose-chat em               { @apply italic text-zinc-300; }
-.prose-chat code             { @apply rounded-md bg-white/10 px-1.5 py-0.5 text-[0.82em] font-geist text-primary-300; }
+.prose-chat code             { @apply rounded-md border border-primary-500/15 bg-primary-500/[0.08] px-1.5 py-0.5 text-[0.82em] font-geist text-primary-300; }
 .prose-chat a                { @apply font-medium text-primary-400 underline underline-offset-2 transition-colors hover:text-primary-300; }
-.prose-chat hr               { @apply my-4 border-0 border-t border-white/10; }
+.prose-chat hr               { @apply my-4 border-0 border-t border-primary-500/15; }
 
-/* tables */
-.prose-chat thead            { @apply bg-white/[0.05]; }
-.prose-chat th               { @apply border-b border-white/10 px-3.5 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-200; }
+/* Page citations the model writes inline, e.g. "(Page 12)" — badged so the
+   reader can see at a glance which page of the PDF a fact came from. */
+.page-cite {
+  @apply mx-0.5 inline-flex items-center gap-1 whitespace-nowrap rounded-md
+         bg-primary-500/[0.12] px-1.5 py-px align-baseline text-[0.75em]
+         font-semibold text-primary-200 ring-1 ring-primary-500/25;
+}
+
+/* tables — scroll inside their wrapper, never widen the page */
+.prose-chat thead            { @apply bg-primary-500/[0.06]; }
+.prose-chat th               { @apply border-b border-primary-500/15 px-3.5 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary-200; }
 .prose-chat td               { @apply border-b border-white/[0.06] px-3.5 py-2 align-top text-zinc-300; }
 .prose-chat tr:last-child td { @apply border-b-0; }
-.prose-chat tbody tr         { @apply transition-colors hover:bg-white/[0.02]; }
+.prose-chat tbody tr         { @apply transition-colors hover:bg-primary-500/[0.03]; }
 
-/* callout bodies — tighten spacing inside Tip/Note/Warning blocks */
+/* callout bodies */
 .prose-chat .callout-body > :first-child { @apply mt-0; }
 .prose-chat .callout-body > :last-child  { @apply mb-0; }
 .prose-chat .callout-body p              { @apply my-1 text-zinc-300; }
 
+/* Long unbroken strings (URLs, hashes) wrap instead of forcing a scrollbar. */
+.prose-chat p,
+.prose-chat li,
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 { overflow-wrap: anywhere; }
+
 /* ──────────────────────────────────────────────────────────────
    LANDING / AUTH — themeable (light + dark) marketing surface.
-   Only the public landing + auth pages consume these classes; they
-   opt into light mode via `dark:` variants. The signed-in app keeps
-   its unconditional dark styling and is unaffected by the toggle.
+   Only the public landing + auth pages consume these classes.
    ────────────────────────────────────────────────────────────── */
 @layer components {
   .lp-card {
     @apply rounded-2xl border backdrop-blur-xl transition-all duration-300
            border-zinc-200/80 bg-white/70 shadow-[0_8px_30px_rgba(2,6,23,0.06)]
-           dark:border-white/10 dark:bg-white/[0.04] dark:shadow-card;
+           dark:border-primary-500/10 dark:bg-white/[0.03] dark:shadow-card;
   }
   .lp-card-hover {
-    @apply hover:-translate-y-1 hover:border-primary-400/50 hover:shadow-[0_18px_50px_rgba(124,58,237,0.14)]
-           dark:hover:border-primary-500/30 dark:hover:shadow-card-hover;
+    @apply hover:-translate-y-1 hover:border-primary-600/50 hover:shadow-[0_18px_50px_rgba(212,175,55,0.16)]
+           dark:hover:border-primary-500/35 dark:hover:shadow-card-hover;
   }
   .lp-eyebrow {
     @apply inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold tracking-wide
-           border-primary-500/20 bg-primary-500/[0.06] text-primary-600
-           dark:border-primary-400/25 dark:bg-primary-500/10 dark:text-primary-300;
+           border-primary-700/25 bg-primary-500/[0.08] text-primary-700
+           dark:border-primary-500/25 dark:bg-primary-500/10 dark:text-primary-300;
   }
   .lp-pill {
     @apply inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium
            border-zinc-200 bg-white/70 text-zinc-600
-           dark:border-white/10 dark:bg-white/5 dark:text-zinc-300;
+           dark:border-primary-500/15 dark:bg-white/5 dark:text-zinc-300;
   }
 }
 
 @layer utilities {
   .lp-h   { @apply text-zinc-900 dark:text-white; }
   .lp-sub { @apply text-zinc-500 dark:text-zinc-400; }
+  /* Light mode needs the darker end of the ramp to stay legible on white. */
   .text-brand-gradient {
-    @apply bg-gradient-to-r from-primary-600 via-accent-600 to-primary-500 bg-clip-text text-transparent
-           dark:from-primary-300 dark:via-accent-300 dark:to-primary-300;
+    @apply bg-gradient-to-r from-primary-700 via-accent-600 to-primary-600 bg-clip-text text-transparent
+           dark:from-primary-300 dark:via-primary-100 dark:to-primary-400;
   }
   .bg-grid-light {
     background-image:
@@ -288,11 +378,9 @@
 .marquee-pause:hover .animate-marquee { animation-play-state: paused; }
 
 /* Light-mode scrollbar tint */
-:root:not(.dark) ::-webkit-scrollbar-thumb        { background: rgba(124,58,237,0.28); }
-:root:not(.dark) ::-webkit-scrollbar-thumb:hover  { background: rgba(124,58,237,0.45); }
+:root:not(.dark) ::-webkit-scrollbar-thumb        { background: rgba(142,111,32,0.30); }
+:root:not(.dark) ::-webkit-scrollbar-thumb:hover  { background: rgba(142,111,32,0.48); }
 
 /* One-section-per-screen scroll snapping — toggled on only while the landing
-   page is mounted (LandingPage adds/removes `landing-snap`), so the signed-in
-   app's normal scrolling is never affected. Mandatory + scroll-snap-stop (set
-   per-section via Tailwind `snap-always`) gives "one scroll = one section". */
+   page is mounted (LandingPage adds/removes `landing-snap`). */
 html.landing-snap { scroll-snap-type: y mandatory; }

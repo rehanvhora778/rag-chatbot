@@ -9,7 +9,7 @@ export default function TermsPage() {
     <LegalLayout
       title="Terms of Use"
       updated="June 27, 2026"
-      intro="By creating an account and using Nexus RAG, you agree to these Terms of Use. Nexus RAG is an academic / portfolio project that demonstrates Retrieval-Augmented Generation and is provided for educational and evaluation purposes."
+      intro="By creating an account and using RAG Chatbot, you agree to these Terms of Use. RAG Chatbot is an academic / portfolio project that demonstrates Retrieval-Augmented Generation and is provided for educational and evaluation purposes."
       sections={[
         {
           heading: '1. Use of the service',

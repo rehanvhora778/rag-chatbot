@@ -1,14 +1,17 @@
 """
-Module 6: Chunking
-Structure-aware, CHARACTER-based chunking for embedding.
+Module 6: Chunking — cutting a page into pieces small enough to embed.
 
-Why character-based and structure-aware?
-The old implementation split on *words* but used RAG_CHUNK_SIZE (512) as the word
-count, producing ~3,000-char chunks that mixed many topics. Their averaged
-embeddings scored poorly against focused questions (e.g. "What are embeddings?"),
-so relevant content was missed. We now build smaller, topic-coherent chunks
-(700-1000 chars) that never split a heading, paragraph, bullet list, or code
-block unless a single block is itself larger than the chunk size.
+An embedding is a single vector for a whole passage, so a passage covering five
+topics averages into a vague vector that matches nothing well. Chunks are
+therefore kept small (~900 characters) and topic-coherent: the text is split on
+blank lines first, so a heading, paragraph or bullet list is never cut in half
+unless that single block is itself bigger than the chunk size.
+
+Consecutive chunks overlap by RAG_CHUNK_OVERLAP characters, so a sentence that
+straddles a boundary still appears whole in one of them.
+
+Each page is chunked separately (see chunk_pages), which is what lets every
+chunk — and therefore every answer — carry the exact page it came from.
 """
 import re
 import logging

@@ -1,0 +1,62 @@
+# ============================================================
+# Production requirements (Render / any Linux host)
+# ============================================================
+# Same as requirements.txt, with two deliberate differences:
+#
+#   1. gunicorn is added — the WSGI server that runs Django in production.
+#      `manage.py runserver` is a development server and must never be used.
+#
+#   2. sentence-transformers is REMOVED. It exists only as the fallback
+#      embedding backend (EMBEDDING_BACKEND=torch) and drags in PyTorch, which
+#      is ~520 MB on its own — more than a free-tier build can comfortably hold.
+#      The default ONNX backend produces identical vectors, so nothing changes
+#      except the install size. `transformers` and `huggingface_hub` are listed
+#      explicitly here because the ONNX backend needs them (tokenizer + model
+#      download) and they used to arrive as sentence-transformers dependencies.
+#
+# Install with:  pip install -r requirements-prod.txt
+
+# Core Framework
+Django==4.2.16
+djangorestframework==3.15.2
+django-cors-headers==4.4.0
+gunicorn==23.0.0
+
+# Authentication
+djangorestframework-simplejwt==5.3.1
+google-auth==2.35.0
+
+# MongoDB
+pymongo[srv]==4.8.0
+dnspython==2.6.1
+
+# Environment
+python-decouple==3.8
+
+# Document Processing
+PyMuPDF==1.24.9
+python-docx==1.1.2
+chardet==5.2.0
+filetype==1.2.0
+
+# Embeddings (ONNX backend) + Vector Search
+onnxruntime==1.27.0
+transformers==4.44.2
+huggingface-hub==0.25.2
+faiss-cpu==1.8.0
+numpy==1.26.4
+
+# PDF Export
+markdown==3.7
+Pygments==2.18.0
+xhtml2pdf==0.2.16
+reportlab==4.5.1
+
+# Utilities
+Pillow==10.4.0
+
+# Static file serving
+whitenoise==6.7.0
+
+# Groq LLM (answer generation + vision OCR for scanned PDFs)
+groq==1.4.0

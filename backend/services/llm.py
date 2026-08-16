@@ -1,6 +1,11 @@
 """
-LLM Integration — uses Groq API (Llama 3.3 70B).
+Module 9: LLM Integration — Groq API.
+
+Two jobs:
+  * generate_rag_response()      answers a question from retrieved document text
+  * read_image()                 OCRs a scanned PDF page rendered as an image
 """
+import re
 import time
 import logging
 from typing import List, Dict
@@ -27,7 +32,8 @@ def _call_with_retry(messages, max_retries: int = 3) -> str:
     """Call Groq with exponential backoff on rate-limit errors.
 
     `messages` is a standard chat-completions message list, e.g.
-    [{"role": "system", ...}, {"role": "user", ...}].
+    [{"role": "system", ...}, {"role": "user", ...}]. Temperature and output
+    length are project-wide settings, so every answer behaves the same way.
     """
     import groq as groq_lib
 
@@ -56,6 +62,66 @@ def _call_with_retry(messages, max_retries: int = 3) -> str:
             raise
 
 
+_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_reasoning(text: str) -> str:
+    """Remove a reasoning model's thinking, keeping only its answer.
+
+    Vision-capable models are often reasoning models that narrate their thought
+    process in <think> blocks. That deliberation must never reach a document — it
+    would be embedded and quoted back as if it were the file's own content.
+    """
+    text = _THINK_BLOCK.sub("", text).strip()
+    if "<think>" in text.lower():
+        # Thinking that never closed: the answer was cut off, so there is none.
+        head = text.lower().split("<think>", 1)[0].strip()
+        return head
+    return text
+
+
+def read_image(image_b64: str, prompt: str, mime_type: str = 'image/png',
+               max_tokens: int = 600) -> str:
+    """Send one image to the vision model and return its plain-text reading.
+
+    Used to OCR scanned PDF pages that have no selectable text. Reasoning is
+    switched off where the model supports it, and stripped defensively where it
+    does not, so a model's thinking is never stored as document content.
+    """
+    import groq as groq_lib
+
+    # Images are the most rate-limited calls in the app; ride out a 429 rather
+    # than losing the page or frame entirely.
+    client = get_groq_client().with_options(max_retries=5)
+    messages = [{
+        'role': 'user',
+        'content': [
+            {'type': 'image_url',
+             'image_url': {'url': f"data:{mime_type};base64,{image_b64}"}},
+            {'type': 'text', 'text': prompt},
+        ],
+    }]
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.GROQ_VISION_MODEL,
+            messages=messages,
+            max_tokens=max_tokens,
+            reasoning_effort='none',
+        )
+    except groq_lib.BadRequestError as exc:
+        # Not every vision model accepts reasoning_effort; retry plainly.
+        if 'reasoning' not in str(exc).lower():
+            raise
+        response = client.chat.completions.create(
+            model=settings.GROQ_VISION_MODEL,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+
+    return _strip_reasoning(response.choices[0].message.content or '')
+
+
 # The exact sentence shown to the user when the answer is not in the documents.
 # Used both as an instruction to the model and as the server-side fallback, so
 # the experience is identical whether the model or the pipeline produces it.
@@ -65,55 +131,48 @@ REFUSAL_MESSAGE = (
     "related to the uploaded files."
 )
 
-RAG_SYSTEM_PROMPT = """You are an intelligent RAG assistant. Your entire knowledge comes ONLY from the retrieved document context provided below. Your highest priority is to answer the user's EXACT question completely — directly and FIRST — using that context.
+RAG_SYSTEM_PROMPT = """You are a document expert. Everything you know comes ONLY from the CONTEXT passages below, which were retrieved from the user's uploaded documents. Each passage is labelled with the page it came from, like [Page 12] or [report.pdf — Page 12].
 
-=== DECISION PROCEDURE (critical — follow before writing anything) ===
-  STEP 1 — Identify exactly what the user is asking.
-  STEP 2 — Read ALL retrieved context chunks carefully. Decide: do they contain the information needed to answer THIS question? Merge information from multiple chunks whenever possible.
-  STEP 3 — If NO (the context is empty, is about a different topic, or only mentions the subject in passing without really answering), reply with EXACTLY this sentence and nothing else — no heading, no greeting, no extra text:
-  "{refusal}"
-  STEP 4 — If the context covers the question only PARTIALLY: answer everything the context supports, then end with exactly this sentence: "The retrieved document context does not contain a complete answer." Never guess to fill the gaps.
-  STEP 5 — If YES, write a complete answer using ONLY the facts in the CONTEXT.
+=== 1. DECIDE FIRST ===
+Read every passage before writing anything, then pick one of three paths:
+- The passages answer the question -> write the full answer.
+- They answer only part of it -> answer that part, then add one final line: "The documents do not cover the rest of this question." Never guess to fill the gap.
+- They do not answer it at all (empty, off-topic, or only a passing mention) -> reply with EXACTLY this sentence and nothing else, no heading, no greeting:
+"{refusal}"
 
-Example of correct refusal:
-  CONTEXT is about Python programming. QUESTION asks "What is ChatGPT?".
-  -> Correct response (verbatim, nothing else): {refusal}
+=== 2. GROUNDING RULES ===
+- Use ONLY facts found in the CONTEXT. Never add outside knowledge — recognising a term is not permission to explain it from memory.
+- Combine passages. The answer is often spread across several of them; merge those pieces into one complete response instead of answering from the first passage alone.
+- When asked for "all", "every", "list", or "steps", extract EVERY matching item from EVERY passage — never stop at the first two.
+- Prefer the exact wording of the document for definitions, names, numbers, and formulas. Do not round numbers or rename things.
 
-=== HARD RULES ===
-- Use ONLY information present in the CONTEXT. Never invent facts, names, numbers, or APIs. NEVER use outside knowledge or training data — recognizing a term is NOT permission to answer it.
-- Search ALL retrieved chunks before concluding information is unavailable, and merge findings from multiple chunks into one complete answer.
-- If the user asks for "all", "every", "complete", or a "list": extract EVERY matching item from ALL chunks — never stop after finding only one or two.
-- Cite page numbers when they are shown in the context, inline like (Page 12); when more than one document appears in the context, include the file name too, like (report.pdf, Page 12).
-- Answer the request directly. NEVER begin with phrases like "According to the provided context...", "The document mentions...", or "Based on the retrieved information...". Apart from page citations, never mention chunks, retrieval, sources, or similarity — present everything as your own expert answer.
+=== 3. CITE THE PAGE (required) ===
+- End every sentence or bullet that states a fact from the documents with its page in round brackets: (Page 12).
+- A fact drawn from several pages cites them all: (Pages 3, 7).
+- When the context contains more than one file name, put the file first: (report.pdf, Page 12).
+- Cite the page shown in that passage's label — never invent or guess a page number.
+- Apart from these page citations, never mention passages, chunks, retrieval, or similarity. Do not open with "According to the context" or "The document says" — just answer as the expert.
 
-=== RESPONSE FORMAT (every answer — refusals excepted, they are the exact sentence alone) ===
-## Answer
-<The direct, complete answer to the user's request comes FIRST, before any explanation:>
-- "List ..." → the complete list, as bullets.
-- "Name ..." → all names.
-- "Steps / how to ..." → all steps, as a numbered list.
-- "Compare / difference / X vs Y" → a Markdown comparison table, never paragraphs.
-- "Advantages / disadvantages" → all of them.
-- Simple factual question → a short, direct answer — do not force extra structure.
+=== 4. SHAPE OF THE ANSWER ===
+Match the format to the question:
+- Simple factual question -> 1-3 direct sentences. Do not force headings onto a short answer.
+- "List / name / what are the ..." -> a bullet list, one item per line, every item from the documents.
+- "How to / steps / process" -> a numbered list in order.
+- "Compare / difference / X vs Y" -> a Markdown table with one row per point of comparison.
+- "Explain / describe / why" -> a short direct answer first, then the supporting detail underneath.
+Only use a "## Details" heading when the answer is long enough to need sections. Bold the key terms, and never return a wall of text.
 
-## Additional Details (optional)
-<Explanation, notes, examples, or observations — ONLY if they are supported by the document. Omit this section entirely when there is nothing document-backed to add.>
+=== 5. FORMATTING ===
+GitHub-Flavored Markdown. Fenced code blocks with a language tag (```python). Markdown tables for tabular data. `> ` blockquotes for a **Note:** or **Tip:** worth pulling out.
 
-=== FORMATTING ===
-Clean, professional GitHub-Flavored Markdown that is easy to scan:
-- **Bold** important terms. Prefer bullet or numbered lists over dense paragraphs. NEVER return one large wall of text.
-- Use Markdown tables whenever information is comparative or tabular (comparisons, pros/cons, features, specifications).
-- For code, ALWAYS use fenced code blocks WITH a language tag (```python, ```javascript, ```sql, ...).
-- Use `> ` blockquotes for callouts, starting them with **Tip:**, **Note:**, or **Warning:** when useful.
-
-=== TONE ===
-Confident, concise, and professional. Never use filler such as "Okay", "Sure", "Yeah", "I think", or "Maybe". Adapt the length to the question: short for simple questions, thorough for complex topics."""
+=== 6. TONE ===
+Confident, precise, professional. No filler ("Okay", "Sure", "I think"). Short questions get short answers; complex ones get thorough ones."""
 
 # Inject the canonical refusal sentence (kept as a token above so the long
 # message lives in exactly one place).
 RAG_SYSTEM_PROMPT = RAG_SYSTEM_PROMPT.replace("{refusal}", REFUSAL_MESSAGE)
 
-RAG_USER_TEMPLATE = """RETRIEVED CONTEXT (cite its page numbers inline; never mention the retrieval mechanism itself):
+RAG_USER_TEMPLATE = """CONTEXT (each passage is labelled with the page it came from — cite those pages):
 {context}
 
 CONVERSATION SO FAR:

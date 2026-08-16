@@ -12,7 +12,9 @@ from core.utils import serialize_mongo_doc
 from core.constants import SESSION_ACTIVE, SESSION_ARCHIVED, EVENT_QUERY, EVENT_EXPORT
 from services.rag_pipeline import run_rag_query
 from services.pdf_export import export_chat_to_pdf, build_export_filename
-from .serializers import CreateSessionSerializer, UpdateSessionSerializer, SendMessageSerializer
+from .serializers import (
+    CreateSessionSerializer, UpdateSessionSerializer, SendMessageSerializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +63,16 @@ class ChatSessionListView(APIView):
 
         doc_ids = serializer.validated_data['document_ids']
 
+        # A malformed id must be a 400, not a 500 — ObjectId() raises on anything
+        # that isn't a 24-character hex string.
+        try:
+            oids = [ObjectId(d) for d in doc_ids]
+        except (InvalidId, TypeError):
+            return APIResponse.error('One or more document ids are not valid.')
+
         # Verify documents belong to user
         valid_docs = list(documents_col().find({
-            '_id': {'$in': [ObjectId(d) for d in doc_ids]},
+            '_id': {'$in': oids},
             'user_id': request.user.id,
             'status': 'completed',
         }, {'original_filename': 1}))
@@ -82,6 +91,7 @@ class ChatSessionListView(APIView):
             'document_names': doc_names,
             'status':        SESSION_ACTIVE,
             'message_count': 0,
+            'last_message_preview': '',
             'created_at':    now,
             'updated_at':    now,
             'last_message_at': now,
@@ -129,6 +139,36 @@ class ChatSessionDetailView(APIView):
             return APIResponse.error('Validation failed.', serializer.errors)
 
         updates = {k: v for k, v in serializer.validated_data.items()}
+
+        # Changing which documents the chat is grounded in. Re-validate against
+        # this user's own completed documents so a crafted id can never attach
+        # someone else's file — the frontend's list is never trusted.
+        if 'document_ids' in updates:
+            requested = updates['document_ids']
+            try:
+                oids = [ObjectId(d) for d in requested]
+            except (InvalidId, TypeError):
+                return APIResponse.error('One or more document ids are not valid.')
+
+            valid_docs = list(documents_col().find({
+                '_id':     {'$in': oids},
+                'user_id': request.user.id,
+                'status':  'completed',
+            }, {'original_filename': 1}))
+
+            if not valid_docs:
+                return APIResponse.error(
+                    'None of those documents are available. They must be your own and '
+                    'finished processing.'
+                )
+
+            # Preserve the order the user picked, dropping anything that didn't
+            # survive validation.
+            by_id = {str(d['_id']): d.get('original_filename', '') for d in valid_docs}
+            ordered = [d for d in requested if d in by_id]
+            updates['document_ids']   = ordered
+            updates['document_names'] = [by_id[d] for d in ordered]
+
         updates['updated_at'] = timezone.now()
 
         chat_sessions_col().update_one({'_id': ObjectId(session_id)}, {'$set': updates})
@@ -213,6 +253,34 @@ class SendMessageView(APIView):
             data['debug'] = result.get('debug', {})
 
         return APIResponse.success(data=data, message='Response generated.')
+
+
+class ChatConfigView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """What the RAG engine is running — read-only, for the Settings page.
+
+        Everything here is a server-side constant that applies to every
+        conversation, so the page reports it rather than offering it as a
+        choice. Reading it from settings means the page can never drift out of
+        step with what the pipeline actually does.
+        """
+        from django.conf import settings
+
+        return APIResponse.success(data={
+            'model':           settings.GROQ_MODEL,
+            'embedding_model': settings.EMBEDDING_MODEL_NAME,
+            'retrieval': {
+                'top_k':          settings.RAG_TOP_K,
+                'chunk_size':     settings.RAG_CHUNK_SIZE,
+                'chunk_overlap':  settings.RAG_CHUNK_OVERLAP,
+                'fetch_k':        settings.RAG_FETCH_K,
+                'use_mmr':        settings.RAG_USE_MMR,
+                'min_similarity': settings.RAG_MIN_SIMILARITY_SCORE,
+                'memory_turns':   settings.CONVERSATION_MEMORY_TURNS,
+            },
+        })
 
 
 class ChatSearchView(APIView):

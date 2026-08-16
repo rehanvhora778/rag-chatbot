@@ -1,16 +1,16 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { Eye, EyeOff, User, Lock, ArrowRight } from 'lucide-react'
+import { Lock, ShieldCheck } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import AnimatedButton from '../components/ui/AnimatedButton'
-import { AuthShell, Field } from '../components/landing/AuthShell'
+import AuthLayout, { AuthAside } from '../components/auth/AuthLayout'
+import { AuthCard, Field, PasswordField, Check, SubmitButton, authLink } from '../components/auth/AuthUI'
+import { SocialRow } from '../components/auth/SocialAuth'
 
 export default function LoginPage() {
-  const { login } = useAuth()
-  const [form, setForm] = useState({ username: '', password: '' })
-  const [showPwd, setShowPwd] = useState(false)
-  const [remember, setRemember] = useState(true)
+  const { login, googleLogin } = useAuth()
+  const [form, setForm] = useState({ email: '', password: '' })
+  const [remember, setRemember] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState({})
 
@@ -22,71 +22,84 @@ export default function LoginPage() {
   const handleSubmit = async e => {
     e.preventDefault()
     const err = {}
-    if (!form.username.trim()) err.username = 'Username is required'
+    if (!form.email.trim()) err.email = 'Email address is required'
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) err.email = 'Enter a valid email address'
     if (!form.password) err.password = 'Password is required'
     if (Object.keys(err).length) { setErrors(err); return }
 
     setLoading(true)
     try {
-      await login(form.username.trim(), form.password)
+      await login(form.email.trim(), form.password)
       toast.success('Welcome back!')
     } catch (e2) {
-      toast.error(e2.response?.data?.message || 'Invalid username or password.')
-    } finally {
+      toast.error(e2.response?.data?.message || 'Could not sign you in. Please try again.')
+      setLoading(false)
+    }
+  }
+
+  const handleGoogle = async credential => {
+    setLoading(true)
+    try {
+      await googleLogin(credential)
+      toast.success('Welcome back!')
+    } catch (e2) {
+      toast.error(e2.response?.data?.message || 'Google sign-in failed.')
       setLoading(false)
     }
   }
 
   return (
-    <AuthShell heading="Welcome back" subheading="Sign in to your Nexus RAG workspace.">
-      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-        <Field
-          label="Username"
-          icon={User}
-          placeholder="your_username"
-          autoComplete="username"
-          value={form.username}
-          onChange={set('username')}
-          error={errors.username}
-        />
-        <Field
-          label="Password"
-          icon={Lock}
-          type={showPwd ? 'text' : 'password'}
-          placeholder="••••••••"
-          autoComplete="current-password"
-          value={form.password}
-          onChange={set('password')}
-          error={errors.password}
-          rightSlot={
-            <button type="button" onClick={() => setShowPwd(v => !v)} className="text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200" aria-label="Toggle password">
-              {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          }
-        />
+    <AuthLayout
+      aside={<AuthAside title="Welcome Back!" subtitle="Login to continue your RAG journey." />}
+    >
+      <AuthCard>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-white">User Login</h1>
+        <p className="mt-1.5 text-sm text-zinc-500">Enter your credentials to access your account</p>
 
-        <label className="flex cursor-pointer items-center gap-2 text-sm lp-sub">
-          <input
-            type="checkbox"
-            checked={remember}
-            onChange={e => setRemember(e.target.checked)}
-            className="h-4 w-4 rounded border-zinc-300 text-primary-600 accent-primary-600 dark:border-white/20"
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
+          <Field
+            label="Email address"
+            type="email"
+            placeholder="Enter your email"
+            autoComplete="email"
+            value={form.email}
+            onChange={set('email')}
+            error={errors.email}
           />
-          Remember me
-        </label>
+          <PasswordField
+            placeholder="Enter your password"
+            autoComplete="current-password"
+            value={form.password}
+            onChange={set('password')}
+            error={errors.password}
+          />
 
-        <AnimatedButton type="submit" loading={loading} className="w-full py-3" size="lg">
-          {!loading && <>Sign In <ArrowRight size={16} /></>}
-          {loading && 'Signing in…'}
-        </AnimatedButton>
-      </form>
+          <div className="flex items-center justify-between pt-0.5">
+            <Check checked={remember} onChange={setRemember}>Remember me</Check>
+            <Link to="/forgot-password" className={`text-[13px] ${authLink}`}>
+              Forgot password?
+            </Link>
+          </div>
 
-      <p className="mt-7 text-center text-sm lp-sub">
-        Don&apos;t have an account?{' '}
-        <Link to="/register" className="font-semibold text-primary-600 hover:underline dark:text-primary-400">
-          Create one free
+          <SubmitButton loading={loading} loadingLabel="Signing in…">Login</SubmitButton>
+        </form>
+
+        <SocialRow onCredential={handleGoogle} disabled={loading} />
+
+        <p className="mt-6 text-center text-sm text-zinc-500">
+          Don&apos;t have an account? <Link to="/register" className={authLink}>Register</Link>
+        </p>
+      </AuthCard>
+
+      {/* admin door — deliberately separate from the user form */}
+      <div className="mt-4 flex flex-col items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.02] px-5 py-3.5 text-sm sm:flex-row">
+        <span className="flex items-center gap-2 text-zinc-500">
+          <Lock size={14} /> Admin access?
+        </span>
+        <Link to="/admin-login" className={`inline-flex items-center gap-1.5 ${authLink}`}>
+          <ShieldCheck size={15} /> Login as Admin
         </Link>
-      </p>
-    </AuthShell>
+      </div>
+    </AuthLayout>
   )
 }

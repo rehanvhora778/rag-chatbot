@@ -248,7 +248,7 @@ export default function AdminPage() {
   const loadUsers = useCallback(() => {
     setUserLoading(true)
     adminAPI.getUsers({ page: userPage, page_size: PAGE_SIZE, search: userSearch })
-      .then(r => { setUsers(r.data.data || []); setUserTotal(r.data.total || 0) })
+      .then(r => { setUsers(r.data.data || []); setUserTotal(r.data.pagination?.total || 0) })
       .catch(() => toast.error('Failed to load users.'))
       .finally(() => setUserLoading(false))
   }, [userPage, userSearch])
@@ -256,7 +256,7 @@ export default function AdminPage() {
   const loadDocs = useCallback(() => {
     setDocLoading(true)
     adminAPI.getDocuments({ page: docPage, page_size: PAGE_SIZE, status: docStatus, search: docSearch })
-      .then(r => { setDocs(r.data.data || []); setDocTotal(r.data.total || 0) })
+      .then(r => { setDocs(r.data.data || []); setDocTotal(r.data.pagination?.total || 0) })
       .catch(() => toast.error('Failed to load documents.'))
       .finally(() => setDocLoading(false))
   }, [docPage, docStatus, docSearch])
@@ -264,7 +264,7 @@ export default function AdminPage() {
   const loadChats = useCallback(() => {
     setChatLoading(true)
     adminAPI.getChats({ page: chatPage, page_size: PAGE_SIZE, search: chatSearch })
-      .then(r => { setChats(r.data.data || []); setChatTotal(r.data.total || 0) })
+      .then(r => { setChats(r.data.data || []); setChatTotal(r.data.pagination?.total || 0) })
       .catch(() => toast.error('Failed to load chats.'))
       .finally(() => setChatLoading(false))
   }, [chatPage, chatSearch])

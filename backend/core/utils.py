@@ -17,16 +17,8 @@ def get_file_extension(filename: str) -> str:
     return Path(filename).suffix.lower().lstrip('.')
 
 
-def is_allowed_extension(filename: str) -> bool:
-    return get_file_extension(filename) in settings.ALLOWED_DOCUMENT_EXTENSIONS
-
-
-def is_allowed_size(file_obj) -> bool:
-    max_bytes = settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024
-    return file_obj.size <= max_bytes
-
-
 def compute_file_hash(file_obj) -> str:
+    """SHA-256 of an upload — used to reject the same file twice."""
     hasher = hashlib.sha256()
     file_obj.seek(0)
     for chunk in iter(lambda: file_obj.read(8192), b''):
@@ -37,12 +29,6 @@ def compute_file_hash(file_obj) -> str:
 
 def get_user_upload_dir(user_id) -> Path:
     path = Path(settings.MEDIA_ROOT) / 'documents' / str(user_id)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def get_user_index_dir(user_id) -> Path:
-    path = Path(settings.FAISS_INDEX_DIR) / str(user_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -74,10 +60,3 @@ def serialize_mongo_doc(doc: Optional[dict]) -> Optional[dict]:
         else:
             result[key] = value
     return result
-
-
-def paginate_list(items: list, page: int, page_size: int):
-    total = len(items)
-    start = (page - 1) * page_size
-    end = start + page_size
-    return items[start:end], total

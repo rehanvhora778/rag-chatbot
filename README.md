@@ -1,7 +1,18 @@
 # AI RAG Chatbot
 
-A full-stack Retrieval-Augmented Generation chatbot: upload documents (PDF / DOCX / TXT),
-then chat with an AI that answers **grounded in your files** with inline citations.
+A full-stack Retrieval-Augmented Generation chatbot: upload your documents
+(PDF / DOCX / TXT), then chat with an AI that answers **grounded in those files** —
+every fact carries the page it came from, e.g. *(Page 12)*.
+
+Scanned PDFs have no selectable text, so those pages are rendered to an image and read
+by Groq's vision model (OCR) before being indexed like any other page.
+
+**How a question is answered**
+
+```
+question -> embed -> FAISS search -> top passages (with page numbers)
+         -> Groq Llama 3.3 70B -> answer + page citations
+```
 
 **Stack:** Django REST Framework · MongoDB · FAISS (vector search) ·
 Sentence-Transformers embeddings · Groq (Llama 3.3 70B) · React + Vite + Tailwind
@@ -14,7 +25,8 @@ Sentence-Transformers embeddings · Groq (Llama 3.3 70B) · React + Vite + Tailw
 │   ├── apps/           authentication, documents, chat, analytics, admin_panel
 │   ├── config/         settings, urls, wsgi/asgi
 │   ├── core/           Mongo client, shared utils, responses, permissions
-│   ├── services/       RAG pipeline, embeddings, FAISS store, chunker, LLM, extractor
+│   ├── services/       RAG pipeline, embeddings, FAISS store, chunker, LLM,
+│   │                   text extractor, PDF export
 │   ├── manage.py
 │   ├── requirements.txt
 │   ├── .env            secrets — not committed (create manually)
@@ -68,11 +80,41 @@ Create `backend\.env` and add your key:
 ```
 GROQ_API_KEY=your-key-here
 ```
-Set up the database, then install the frontend packages:
+Set up the database, create the administrator, then install the frontend packages:
 ```
 cd backend
 ..\venv\Scripts\python manage.py migrate
-..\venv\Scripts\python manage.py createsuperuser
+..\venv\Scripts\python manage.py create_admin
 cd ..\frontend
 npm install
 ```
+
+## Signing in
+
+Accounts are identified by **email address** — there is no username to remember.
+
+| Page | Route | Who it's for |
+|---|---|---|
+| Register | `/register` | New users — name, email, password |
+| User login | `/login` | Everyone |
+| Admin login | `/admin-login` | Staff only; the endpoint rejects normal accounts |
+
+`manage.py create_admin` seeds the administrator from `DEFAULT_ADMIN_EMAIL` /
+`DEFAULT_ADMIN_PASSWORD` in `backend\.env` (defaults: `rehanvhora86@gmail.com` /
+`rehan@786`). Re-run it any time to reset that password. From **Admin Console →
+Users** an admin can promote or demote other admins, deactivate accounts, and
+delete users along with their data.
+
+### Google (Gmail) sign-in — optional
+
+The "Continue with Google" buttons stay inert until you add an OAuth client id.
+Create an **OAuth 2.0 Client ID → Web application** at
+https://console.cloud.google.com/apis/credentials, list `http://localhost:3000`
+under *Authorised JavaScript origins*, then put the id in `backend\.env`:
+```
+GOOGLE_CLIENT_ID=xxxxxxxx.apps.googleusercontent.com
+```
+The frontend picks it up from the backend automatically (or set
+`VITE_GOOGLE_CLIENT_ID` in `frontend\.env` to override). Signing in with Google
+creates the account on first use; the ID token is verified server-side against
+Google's public keys.

@@ -28,8 +28,10 @@ api.interceptors.response.use(
   async error => {
     const original = error.config
     if (error.response?.status === 401 && !original._retry) {
-      // Don't intercept 401s from the login endpoint itself — let the catch block handle them
-      if (original.url?.includes('/api/auth/login/')) {
+      // Don't intercept 401s from the sign-in endpoints themselves — those are
+      // "wrong credentials", not "expired session"; let the caller handle them.
+      const SIGN_IN_PATHS = ['/api/auth/login/', '/api/auth/admin/login/', '/api/auth/google/', '/api/auth/register/']
+      if (SIGN_IN_PATHS.some(p => original.url?.includes(p))) {
         return Promise.reject(error)
       }
 

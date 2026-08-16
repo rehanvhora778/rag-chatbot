@@ -1,7 +1,12 @@
 """
 Module 5: Text Extraction
-Extracts text with page-level metadata from PDF, DOCX, and TXT files.
-Supports native PDFs and scanned/image-based PDFs via Groq Vision (Llama) OCR fallback.
+
+Turns an uploaded PDF, DOCX or TXT file into a list of pages:
+    [{'page_number': 1, 'content': '...', 'char_count': 123}, ...]
+
+Every page keeps its own number so answers can cite the exact page a fact came
+from. Scanned PDFs have no selectable text, so those pages are rendered to an
+image and read by Groq Vision (OCR) instead.
 """
 import logging
 from pathlib import Path
@@ -104,33 +109,15 @@ def _ocr_image_b64(img_b64: str, page_num: int) -> str:
     parallelize across scanned pages.
     """
     try:
-        from services.llm import get_groq_client
+        from services.llm import read_image
 
-        client = get_groq_client()
-        response = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{img_b64}"},
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Extract all the text from this document page image. "
-                                "Return only the extracted text, preserving paragraphs. "
-                                "Do not add any commentary or descriptions."
-                            ),
-                        },
-                    ],
-                }
-            ],
-            max_tokens=4096,
+        text = read_image(
+            img_b64,
+            "Extract all the text from this document page image. "
+            "Return only the extracted text, preserving paragraphs. "
+            "Do not add any commentary or descriptions.",
+            max_tokens=2048,
         )
-        text = response.choices[0].message.content.strip()
         logger.info("Groq Vision OCR extracted %d chars from page %d", len(text), page_num)
         return text
     except Exception as exc:

@@ -1,67 +1,50 @@
-import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { LogOut } from 'lucide-react'
-import { useAuth } from '../../contexts/AuthContext'
-import toast from 'react-hot-toast'
+import { useLocation } from 'react-router-dom'
+import { Menu } from 'lucide-react'
+import Logo from '../ui/Logo'
+import UserMenu from './UserMenu'
 
 const pageTitles = {
-  '/dashboard': { title: 'Dashboard',   sub: 'Your AI workspace overview' },
-  '/documents': { title: 'Documents',   sub: 'Manage your knowledge base' },
-  '/chat':      { title: 'Chat',         sub: 'AI-powered conversations' },
-  '/analytics': { title: 'Analytics',    sub: 'Usage insights' },
-  '/profile':   { title: 'Profile',      sub: 'Manage your account' },
-  '/admin':     { title: 'Admin Panel',  sub: 'System management' },
+  '/dashboard':      { title: 'Dashboard',      sub: 'Your AI workspace overview' },
+  '/chat':           { title: 'RAG Chatbot',    sub: 'Ask anything about your documents' },
+  '/documents':      { title: 'Documents',      sub: 'Manage your knowledge base' },
+  '/analytics':      { title: 'Analytics',      sub: 'Usage insights' },
+  '/settings':       { title: 'Settings',       sub: 'How your documents are read and answered' },
+  '/profile':        { title: 'Profile',        sub: 'Manage your account' },
+  '/admin':          { title: 'Admin Panel',    sub: 'System management' },
 }
 
-export default function Navbar() {
-  const { user, logout } = useAuth()
+export default function Navbar({ onOpenMenu }) {
   const location = useLocation()
-  const [loggingOut, setLoggingOut] = useState(false)
-
-  const handleLogout = async () => {
-    setLoggingOut(true)
-    try { await logout() }
-    catch { toast.error('Logout failed.') }
-    finally { setLoggingOut(false) }
-  }
 
   const page =
     Object.entries(pageTitles).find(
       ([path]) => location.pathname === path || location.pathname.startsWith(path + '/'),
-    )?.[1] || { title: 'Nexus RAG', sub: '' }
+    )?.[1] || { title: 'RAG Chatbot', sub: '' }
 
   return (
-    <header className="z-10 flex h-[60px] shrink-0 items-center justify-between border-b border-white/[0.06] bg-ink-950/60 px-6 backdrop-blur-xl">
-      <div>
-        <h1 className="font-display text-sm font-semibold leading-none text-white">{page.title}</h1>
-        {page.sub && <p className="mt-1 text-xs text-zinc-500">{page.sub}</p>}
+    <header className="z-30 flex h-[60px] shrink-0 items-center gap-3 border-b border-white/[0.06] bg-ink-950/70 px-3 backdrop-blur-xl sm:px-6">
+      <button
+        onClick={onOpenMenu}
+        aria-label="Open menu"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-primary-500/10 hover:text-primary-300 lg:hidden"
+      >
+        <Menu size={19} />
+      </button>
+
+      {/* The rail is off-canvas on mobile, so the brand mark lives here instead. */}
+      <Logo size={30} id="nav" className="lg:hidden" />
+
+      <div className="min-w-0 flex-1">
+        <h1 className="truncate font-display text-sm font-semibold leading-none text-white">{page.title}</h1>
+        {page.sub && <p className="mt-1 hidden truncate text-xs text-zinc-500 sm:block">{page.sub}</p>}
       </div>
 
-      <div className="flex items-center gap-1.5">
-        <Link
-          to="/profile"
-          title="View profile"
-          className="flex items-center gap-2.5 rounded-xl py-1.5 pl-1 pr-2 transition-colors hover:bg-white/[0.06]"
-        >
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-accent-600 text-xs font-bold text-white shadow-glow-sm">
-            {user?.username?.[0]?.toUpperCase()}
-          </div>
-          <div className="hidden sm:block">
-            <p className="text-xs font-semibold leading-none text-zinc-200">{user?.username}</p>
-            <p className="mt-0.5 text-[10px] text-zinc-500">{user?.is_staff ? 'Admin' : 'Member'}</p>
-          </div>
-        </Link>
-
-        <motion.button
-          whileTap={{ scale: 0.92 }}
-          onClick={handleLogout}
-          disabled={loggingOut}
-          title="Sign out"
-          className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
-        >
-          <LogOut size={16} />
-        </motion.button>
+      {/* Full chip where there's room; avatar-only on phones. */}
+      <div className="hidden shrink-0 sm:block sm:w-[172px]">
+        <UserMenu align="down" />
+      </div>
+      <div className="shrink-0 sm:hidden">
+        <UserMenu align="down" collapsed />
       </div>
     </header>
   )

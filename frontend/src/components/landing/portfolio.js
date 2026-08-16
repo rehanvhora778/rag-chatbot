@@ -5,7 +5,7 @@
  * group can be updated in one place. Items marked TODO are placeholders.
  */
 export const PROJECT = {
-  name: 'Nexus RAG',
+  name: 'RAG Chatbot',
   type: 'Project',
   college: 'L.J. University',
   department: 'AI & Data Science',      // TODO: your department / course name

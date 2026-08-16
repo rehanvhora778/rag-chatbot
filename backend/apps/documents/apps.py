@@ -8,16 +8,21 @@ class DocumentsConfig(AppConfig):
     verbose_name = 'Documents'
 
     def ready(self):
-        """Warm the embedding model in the background when an actual server
-        process starts, so the first upload/chat never waits for model load.
-        Skipped for management commands (migrate, shell, reprocess, ...)."""
+        """Prepare a server process for background work.
+
+        Two things happen here, both only in a process that actually serves
+        requests (management commands like migrate/shell are skipped):
+
+          1. numpy is imported on this, the main thread. Uploads are processed
+             in background threads, so without this the first two of them can
+             race to import numpy and one crashes on a half-built module.
+          2. The embedding model is warmed in the background, so the first
+             upload or chat message doesn't wait for it to load.
+        """
         import os
         import sys
 
         from django.conf import settings
-
-        if not getattr(settings, 'EMBEDDING_PRELOAD', True):
-            return
 
         argv = ' '.join(sys.argv)
         if 'runserver' in argv:
@@ -28,5 +33,10 @@ class DocumentsConfig(AppConfig):
         elif 'manage.py' in argv:
             return  # some other management command — no server here
 
-        from services.embeddings import preload_embedding_model_async
-        preload_embedding_model_async()
+        # Step 1 runs whether or not the preload is enabled — the thread race it
+        # prevents comes from concurrent uploads, not from the preload alone.
+        from services.embeddings import ensure_numpy_loaded, preload_embedding_model_async
+        ensure_numpy_loaded()
+
+        if getattr(settings, 'EMBEDDING_PRELOAD', True):
+            preload_embedding_model_async()

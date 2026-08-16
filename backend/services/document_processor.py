@@ -1,27 +1,67 @@
 """
-Document processing pipeline: extract → chunk → embed → store in FAISS + MongoDB.
-All ML imports are lazy to avoid startup failures when packages aren't installed yet.
+Module 7: Document Processing — what happens after a file is uploaded.
+
+    file -> extract text (per page)
+         -> split into overlapping chunks
+         -> embed each chunk into a 384-d vector
+         -> save chunks to MongoDB + vectors to a FAISS index
+
+Runs in a background thread, so the upload request returns immediately and the
+UI polls the document's status. ML imports are done inside the function so the
+server can start even before the heavy packages are loaded.
 """
 import logging
+import time
+
+from bson import ObjectId
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
 
+def _mark(document_id: ObjectId, **fields) -> None:
+    """Update a document record, always refreshing `updated_at`."""
+    from core.mongo import documents_col
+
+    documents_col().update_one(
+        {'_id': document_id},
+        {'$set': {**fields, 'updated_at': timezone.now()}},
+    )
+
+
+def _add_summary(document_id: ObjectId, pages: list) -> None:
+    """Generate the AI summary and store it.
+
+    Deliberately runs *after* the document is marked completed: it is a blocking
+    LLM call, and the user should be able to start chatting without waiting for
+    it. Fully guarded so a summary failure can never fail an indexed document.
+    """
+    from services.llm import generate_document_summary
+
+    try:
+        summary = generate_document_summary(pages)
+    except Exception as exc:
+        logger.warning("Summary generation failed: %s", exc)
+        summary = "Summary could not be generated."
+
+    try:
+        _mark(document_id, summary=summary)
+    except Exception as exc:
+        logger.warning("Could not store the summary: %s", exc)
+
+
 def process_document(document_id: str, user_id: int, file_path: str, file_type: str) -> None:
-    """Extract -> clean -> chunk -> embed -> store. Safe to re-run: any existing
-    chunks and FAISS index for this document are deleted first so embeddings are
-    always rebuilt fresh (never stale)."""
-    import time
-    from bson import ObjectId
-    from django.conf import settings
+    """Extract -> chunk -> embed -> index one uploaded document.
+
+    Safe to re-run: existing chunks and the FAISS index are dropped first, so
+    the embeddings are always rebuilt fresh rather than duplicated.
+    """
     from core.mongo import documents_col, chunks_col
     from core.constants import STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED
     from services.text_extractor import extract_text, get_word_count
     from services.chunker import chunk_pages
     from services.embeddings import embed_chunks
     from services.faiss_store import save_index, delete_index
-    from services.llm import generate_document_summary
 
     doc_oid = ObjectId(document_id)
     started = time.perf_counter()
@@ -29,48 +69,43 @@ def process_document(document_id: str, user_id: int, file_path: str, file_type: 
     try:
         doc = documents_col().find_one({'_id': doc_oid}, {'original_filename': 1})
         filename = (doc or {}).get('original_filename', '')
+        _mark(doc_oid, status=STATUS_PROCESSING)
 
-        documents_col().update_one(
-            {'_id': doc_oid},
-            {'$set': {'status': STATUS_PROCESSING, 'updated_at': timezone.now()}},
-        )
-
-        # --- Rebuild from scratch: drop any stale chunks + vector index ---
-        deleted = chunks_col().delete_many({'document_id': document_id}).deleted_count
+        # Clear anything left from a previous run of this same document.
+        chunks_col().delete_many({'document_id': document_id})
         delete_index(user_id, document_id)
-        if deleted:
-            logger.info("Cleared %d stale chunk(s) before reprocessing %s", deleted, document_id)
 
-        logger.info("Uploaded file: %s (type=%s) — extracting text", file_path, file_type)
+        # --- 1. Text, one entry per page ---
         pages = extract_text(file_path, file_type)
         if not pages:
             raise ValueError(
                 "No text could be extracted from this document. "
                 "The file may be corrupted, empty, or in an unsupported format."
             )
-        # Filter out pure placeholder pages for chunking/embedding, but keep for summary
+
+        # OCR leaves a "[Page 4: Image-based content...]" placeholder for pages it
+        # could not read. Those carry no meaning, so they are excluded from the
+        # index — unless that is all we have, in which case the document is kept
+        # anyway rather than failing the upload outright.
         real_pages = [p for p in pages if not p['content'].startswith('[Page ')]
         if not real_pages:
-            logger.warning("Only placeholder pages found — document may be fully image-based with no OCR.")
-            # Use placeholders anyway so the document doesn't hard-fail
+            logger.warning("%s: no readable text found — indexing placeholders.", filename)
             real_pages = pages
 
-        word_count = get_word_count(real_pages)
-        page_count = len(pages)
-        logger.info("Document processed — pages extracted: %d", page_count)
-
+        # --- 2. Chunks ---
         chunks = chunk_pages(real_pages)
         if not chunks:
             raise ValueError("Chunking produced no results.")
-        logger.info("Chunks created: %d", len(chunks))
 
+        # --- 3. Vectors ---
         embeddings = embed_chunks(chunks)
-        logger.info("Embeddings generated: %d vectors (model: %s)",
-                    embeddings.shape[0], settings.EMBEDDING_MODEL_NAME)
 
-        chunk_docs = []
-        for chunk in chunks:
-            chunk_docs.append({
+        # --- 4. Store: chunk text in MongoDB, vectors in FAISS ---
+        # Each chunk keeps its page_number — that is what lets an answer cite
+        # "(Page 12)" later on.
+        now = timezone.now()
+        inserted = chunks_col().insert_many([
+            {
                 'document_id': document_id,
                 'user_id':     user_id,
                 'filename':    filename,
@@ -80,63 +115,34 @@ def process_document(document_id: str, user_id: int, file_path: str, file_type: 
                 'start_char':  chunk['start_char'],
                 'end_char':    chunk['end_char'],
                 'word_count':  chunk['word_count'],
-                'created_at':  timezone.now(),
-            })
+                'created_at':  now,
+            }
+            for chunk in chunks
+        ])
+        chunk_ids = [str(oid) for oid in inserted.inserted_ids]
+        save_index(user_id, document_id, embeddings, chunk_ids)
 
-        insert_result = chunks_col().insert_many(chunk_docs)
-        chunk_ids_for_faiss = [str(oid) for oid in insert_result.inserted_ids]
-
-        save_index(user_id, document_id, embeddings, chunk_ids_for_faiss)
-        logger.info("Vector database ready: %d vectors indexed", len(chunk_ids_for_faiss))
-
-        # Mark completed as soon as the document is searchable/chattable. The AI
-        # summary is a blocking LLM call, so it's generated AFTER this point and
-        # never delays when the user can start chatting.
-        documents_col().update_one(
-            {'_id': doc_oid},
-            {
-                '$set': {
-                    'status':       STATUS_COMPLETED,
-                    'page_count':   page_count,
-                    'word_count':   word_count,
-                    'chunk_count':  len(chunks),
-                    'vector_count': len(chunk_ids_for_faiss),
-                    'summary':      'Generating summary…',
-                    'error_message': '',
-                    'updated_at':   timezone.now(),
-                }
-            },
+        # --- 5. Ready to chat with ---
+        word_count = get_word_count(real_pages)
+        _mark(
+            doc_oid,
+            status=STATUS_COMPLETED,
+            page_count=len(pages),
+            word_count=word_count,
+            chunk_count=len(chunks),
+            vector_count=len(chunk_ids),
+            summary='Generating summary…',
+            error_message='',
         )
         logger.info(
-            "Document %s ready in %.1fs: %d pages, %d chunks, %d words",
-            document_id, time.perf_counter() - started, page_count, len(chunks), word_count,
+            "Indexed %s in %.1fs: %d pages, %d chunks, %d words",
+            filename or document_id, time.perf_counter() - started,
+            len(pages), len(chunks), word_count,
         )
 
-        # --- Deferred summary: fully guarded so nothing here can flip an already
-        # completed document to 'failed'. ---
-        try:
-            logger.info("Generating AI summary for document %s", document_id)
-            summary = generate_document_summary(real_pages)
-        except Exception as exc:
-            logger.warning("Summary generation failed: %s", exc)
-            summary = "Summary could not be generated."
-        try:
-            documents_col().update_one(
-                {'_id': doc_oid},
-                {'$set': {'summary': summary, 'updated_at': timezone.now()}},
-            )
-        except Exception as exc:
-            logger.warning("Failed to store summary for %s: %s", document_id, exc)
+        _add_summary(doc_oid, real_pages)
 
     except Exception as exc:
-        logger.error("Document processing failed for %s: %s", document_id, exc, exc_info=True)
-        from bson import ObjectId as ObjId
-        documents_col().update_one(
-            {'_id': doc_oid},
-            {'$set': {
-                'status': 'failed',
-                'error_message': str(exc),
-                'updated_at': timezone.now(),
-            }},
-        )
+        logger.error("Processing failed for %s: %s", document_id, exc, exc_info=True)
+        _mark(doc_oid, status=STATUS_FAILED, error_message=str(exc))
         raise

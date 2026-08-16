@@ -12,11 +12,12 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from core.mongo import documents_col, chunks_col
 from core.responses import APIResponse
 from core.utils import (
-    generate_unique_filename, compute_file_hash,
-    get_file_extension, get_user_upload_dir, serialize_mongo_doc, format_file_size
+    generate_unique_filename, compute_file_hash, get_file_extension,
+    get_user_upload_dir, serialize_mongo_doc, format_file_size
 )
 from core.constants import STATUS_PENDING, EVENT_UPLOAD
 from services.document_processor import process_document
+from .serializers import RenameDocumentSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,8 @@ class DocumentListUploadView(APIView):
             return APIResponse.error('No files provided.')
 
         from django.conf import settings
-        max_bytes = settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024
         allowed_exts = settings.ALLOWED_DOCUMENT_EXTENSIONS
+        limit_mb = settings.MAX_DOCUMENT_SIZE_MB
 
         created_docs = []
         errors = []
@@ -72,8 +73,8 @@ class DocumentListUploadView(APIView):
             if ext not in allowed_exts:
                 errors.append(f"{f.name}: unsupported type. Allowed: {', '.join(allowed_exts)}.")
                 continue
-            if f.size > max_bytes:
-                errors.append(f"{f.name}: exceeds size limit.")
+            if f.size > limit_mb * 1024 * 1024:
+                errors.append(f"{f.name}: exceeds the {limit_mb} MB limit for .{ext} files.")
                 continue
 
             file_hash = compute_file_hash(f)
@@ -111,6 +112,7 @@ class DocumentListUploadView(APIView):
                 'created_at':        now,
                 'updated_at':        now,
             }
+
             result = documents_col().insert_one(doc)
             document_id = str(result.inserted_id)
             doc['_id'] = document_id
@@ -162,6 +164,47 @@ class DocumentDetailView(APIView):
         if not doc:
             return APIResponse.not_found('Document not found.')
         return APIResponse.success(data=_serialize_doc(doc))
+
+    def patch(self, request, document_id):
+        """Rename a document. Only the display name changes — the file on disk,
+        its hash, chunks and FAISS index are all untouched."""
+        doc = self._get_document(document_id, request.user.id)
+        if not doc:
+            return APIResponse.not_found('Document not found.')
+
+        serializer = RenameDocumentSerializer(data=request.data)
+        if not serializer.is_valid():
+            return APIResponse.error('Validation failed.', serializer.errors)
+
+        new_name = serializer.validated_data['original_filename']
+        documents_col().update_one(
+            {'_id': ObjectId(document_id)},
+            {'$set': {'original_filename': new_name, 'updated_at': timezone.now()}},
+        )
+        # Chunks carry a denormalised copy of the filename; keep it in step so
+        # citations don't keep quoting the old name.
+        chunks_col().update_many(
+            {'document_id': document_id, 'user_id': request.user.id},
+            {'$set': {'filename': new_name}},
+        )
+        # Chat sessions cache the names of the documents they're grounded in.
+        old_name = doc.get('original_filename', '')
+        if old_name and old_name != new_name:
+            from core.mongo import chat_sessions_col
+            for s in chat_sessions_col().find(
+                {'user_id': request.user.id, 'document_ids': document_id},
+                {'document_ids': 1, 'document_names': 1},
+            ):
+                names = list(s.get('document_names') or [])
+                ids   = list(s.get('document_ids') or [])
+                if document_id in ids and len(names) == len(ids):
+                    names[ids.index(document_id)] = new_name
+                    chat_sessions_col().update_one(
+                        {'_id': s['_id']}, {'$set': {'document_names': names}},
+                    )
+
+        updated = documents_col().find_one({'_id': ObjectId(document_id)})
+        return APIResponse.success(data=_serialize_doc(updated), message='Document renamed.')
 
     def delete(self, request, document_id):
         doc = self._get_document(document_id, request.user.id)

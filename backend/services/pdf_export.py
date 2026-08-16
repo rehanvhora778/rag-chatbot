@@ -6,6 +6,9 @@ technical document — NOT a chat transcript. No usernames, timestamps, sources,
 page references, or any RAG/retrieval metadata ever appear in the output. The
 reader cannot tell the answer came from a RAG system.
 
+Note: this is a separate, plain-text export path. The download button in the
+chat header produces the dark, styled PDF instead (see exportPDF in ChatPage).
+
 Pipeline:  Markdown  ->  HTML (python-markdown)  ->  styled PDF.
 Rendering: WeasyPrint when available (best fidelity), otherwise xhtml2pdf — a
 pure-Python engine with zero native dependencies that always works on Windows.

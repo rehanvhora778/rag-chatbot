@@ -1,4 +1,4 @@
-import { useState, memo } from 'react'
+import { useState, memo, Children } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -42,8 +42,8 @@ function CodeBlock({ language, value }) {
     } catch { /* clipboard unavailable */ }
   }
   return (
-    <div className="my-3.5 overflow-hidden rounded-xl border border-white/10 bg-[#0b0b12] shadow-sm">
-      <div className="flex items-center justify-between border-b border-white/[0.07] bg-white/[0.03] px-3.5 py-1.5">
+    <div className="my-3.5 overflow-hidden rounded-xl border border-primary-500/25 bg-[#0b0b0d] shadow-sm">
+      <div className="flex items-center justify-between border-b border-primary-500/20 bg-primary-500/[0.05] px-3.5 py-1.5">
         <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500">{language || 'code'}</span>
         <button
           onClick={copy}
@@ -99,7 +99,39 @@ function Callout({ children }) {
   )
 }
 
+/* ── Page citations ──────────────────────────────────────────────
+   The model ends factual sentences with the page it used: "(Page 12)",
+   "(Pages 3, 7)" or "(report.pdf, Page 12)". This finds those in the plain
+   text and swaps them for a badge, so the page a fact came from is visible
+   at a glance instead of buried in brackets.                              */
+const CITATION = /\((?:([^()]{1,60}?),\s*)?(pages?\s+\d+(?:\s*(?:,|and|–|-)\s*\d+)*)\)/gi
+
+function withCitations(children) {
+  return Children.map(children, child => {
+    if (typeof child !== 'string') return child
+
+    const parts = []
+    let cursor = 0
+    for (const match of child.matchAll(CITATION)) {
+      const [whole, file, pages] = match
+      if (match.index > cursor) parts.push(child.slice(cursor, match.index))
+      parts.push(
+        <span key={match.index} className="page-cite">
+          {file ? `${file} · ` : ''}{pages.replace(/^p/, 'P')}
+        </span>,
+      )
+      cursor = match.index + whole.length
+    }
+    if (!parts.length) return child
+    if (cursor < child.length) parts.push(child.slice(cursor))
+    return parts
+  })
+}
+
 const COMPONENTS = {
+  p({ children })  { return <p>{withCitations(children)}</p> },
+  li({ children }) { return <li>{withCitations(children)}</li> },
+  td({ children }) { return <td>{withCitations(children)}</td> },
   pre({ children }) {
     const codeEl = Array.isArray(children) ? children[0] : children
     const className = codeEl?.props?.className || ''
@@ -113,7 +145,7 @@ const COMPONENTS = {
   },
   table({ children }) {
     return (
-      <div className="my-3.5 overflow-x-auto rounded-xl border border-white/10">
+      <div className="my-3.5 overflow-x-auto rounded-xl border border-primary-500/25">
         <table className="w-full border-collapse text-left text-sm">{children}</table>
       </div>
     )

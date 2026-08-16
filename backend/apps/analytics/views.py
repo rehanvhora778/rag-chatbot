@@ -61,6 +61,68 @@ class UserAnalyticsView(APIView):
         ]
         type_breakdown = {r['_id']: r['count'] for r in documents_col().aggregate(type_pipeline)}
 
+        # Most-used documents — how many questions were asked against each one.
+        # A session pins its documents up front, so a session's user-message
+        # count is exactly the number of questions asked of those documents.
+        usage = {}
+        for s in chat_sessions_col().find(
+            {'user_id': uid}, {'document_ids': 1, 'message_count': 1},
+        ):
+            # message_count counts both sides of each exchange.
+            questions = (s.get('message_count', 0) or 0) // 2
+            for doc_id in (s.get('document_ids') or []):
+                entry = usage.setdefault(doc_id, {'queries': 0, 'sessions': 0})
+                entry['queries']  += questions
+                entry['sessions'] += 1
+
+        most_used = []
+        if usage:
+            from bson import ObjectId
+            from bson.errors import InvalidId
+            oids = []
+            for d in usage:
+                try:
+                    oids.append(ObjectId(d))
+                except (InvalidId, TypeError):
+                    continue
+            names = {
+                str(d['_id']): d.get('original_filename', 'Unknown')
+                for d in documents_col().find(
+                    {'_id': {'$in': oids}, 'user_id': uid},
+                    {'original_filename': 1},
+                )
+            }
+            # Documents that have since been deleted drop out here rather than
+            # showing up as "Unknown" rows.
+            most_used = sorted(
+                (
+                    {'document_id': doc_id, 'name': names[doc_id], **stats}
+                    for doc_id, stats in usage.items() if doc_id in names
+                ),
+                key=lambda r: (r['queries'], r['sessions']),
+                reverse=True,
+            )[:5]
+
+        # Recent activity — the raw event log, newest first.
+        ACTIVITY_LABELS = {
+            EVENT_UPLOAD:  'Uploaded a document',
+            EVENT_QUERY:   'Asked a question',
+            EVENT_EXPORT:  'Exported a chat',
+            EVENT_SUMMARY: 'Generated a summary',
+        }
+        recent_activity = [
+            {
+                'event_type': e.get('event_type', ''),
+                'label':      ACTIVITY_LABELS.get(e.get('event_type'), 'Activity'),
+                'detail':     (e.get('metadata') or {}).get('filename', ''),
+                'created_at': e.get('created_at'),
+            }
+            for e in analytics_col()
+            .find({'user_id': uid, 'event_type': {'$in': list(ACTIVITY_LABELS)}})
+            .sort('created_at', -1)
+            .limit(12)
+        ]
+
         return APIResponse.success(data={
             'documents': {
                 'total':      total_docs,
@@ -81,7 +143,9 @@ class UserAnalyticsView(APIView):
                 'queries_last_30d':  queries_30d,
                 'exports_last_30d':  exports_30d,
             },
-            'daily_query_trend': daily_trend,
+            'daily_query_trend':   daily_trend,
+            'most_used_documents': most_used,
+            'recent_activity':     recent_activity,
         })
 
 

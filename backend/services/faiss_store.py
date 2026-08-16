@@ -154,7 +154,3 @@ def search_multiple_indexes(
     if use_mmr:
         return _mmr_select(candidates, top_k, lambda_mult)
     return [(cid, score) for cid, score, _ in candidates[:top_k]]
-
-
-def index_exists(user_id, document_id: str) -> bool:
-    return _index_path(user_id, document_id).exists()

@@ -113,6 +113,7 @@ MONGO_COLLECTIONS = {
     'MESSAGES':           'messages',
     'ANALYTICS':          'analytics',
     'DOCUMENT_SUMMARIES': 'document_summaries',
+    'OTPS':               'otps',
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -146,6 +147,50 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
     'JTI_CLAIM': 'jti',
 }
+
+# ═══════════════════════════════════════════════════════════════
+# GOOGLE (GMAIL) SIGN-IN
+# ═══════════════════════════════════════════════════════════════
+
+# OAuth 2.0 Web client ID from https://console.cloud.google.com/apis/credentials
+# The same value must be given to the frontend as VITE_GOOGLE_CLIENT_ID.
+# Leave blank to disable the "Continue with Google" buttons.
+GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
+
+# Seed account used by `python manage.py create_admin`.
+DEFAULT_ADMIN_EMAIL    = config('DEFAULT_ADMIN_EMAIL',    default='rehanvhora86@gmail.com')
+DEFAULT_ADMIN_PASSWORD = config('DEFAULT_ADMIN_PASSWORD', default='rehan@786')
+DEFAULT_ADMIN_NAME     = config('DEFAULT_ADMIN_NAME',     default='Rehan Vhora')
+
+# ═══════════════════════════════════════════════════════════════
+# EMAIL — delivers the one-time codes for sign-up and password reset
+# ═══════════════════════════════════════════════════════════════
+
+EMAIL_HOST          = config('EMAIL_HOST',     default='smtp.gmail.com')
+EMAIL_PORT          = config('EMAIL_PORT',     default=587, cast=int)
+EMAIL_USE_TLS       = config('EMAIL_USE_TLS',  default=True, cast=bool)
+EMAIL_HOST_USER     = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_TIMEOUT       = 15                       # never hang a request on a dead SMTP host
+DEFAULT_FROM_EMAIL  = config('DEFAULT_FROM_EMAIL',
+                             default=EMAIL_HOST_USER or 'RAG Chatbot <no-reply@localhost>')
+
+# Without SMTP credentials the codes are printed to the runserver console
+# instead of being mailed, so the whole OTP flow still works offline.
+EMAIL_BACKEND = ('django.core.mail.backends.smtp.EmailBackend' if EMAIL_HOST_USER
+                 else 'django.core.mail.backends.console.EmailBackend')
+
+# ═══════════════════════════════════════════════════════════════
+# OTP — one-time codes (stored in MongoDB, never in plaintext)
+# ═══════════════════════════════════════════════════════════════
+
+OTP_LENGTH                  = 6
+OTP_TTL_MINUTES             = config('OTP_TTL_MINUTES',             default=10, cast=int)
+OTP_MAX_ATTEMPTS            = config('OTP_MAX_ATTEMPTS',            default=5,  cast=int)
+OTP_RESEND_COOLDOWN_SECONDS = config('OTP_RESEND_COOLDOWN_SECONDS', default=60, cast=int)
+OTP_MAX_SENDS_PER_HOUR      = config('OTP_MAX_SENDS_PER_HOUR',      default=6,  cast=int)
+# How long the ticket handed out after a correct reset code stays usable.
+OTP_RESET_TOKEN_TTL_MINUTES = config('OTP_RESET_TOKEN_TTL_MINUTES', default=15, cast=int)
 
 # ═══════════════════════════════════════════════════════════════
 # DJANGO REST FRAMEWORK
@@ -217,9 +262,11 @@ _VOLUME = Path(os.environ.get('VOLUME_PATH', str(BASE_DIR)))
 MEDIA_ROOT = _VOLUME / 'media'
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024
-FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024
+# Uploads above this stream to a temp file instead of being buffered in RAM.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 
 MAX_DOCUMENT_SIZE_MB = config('MAX_DOCUMENT_SIZE_MB', default=50, cast=int)
+
 ALLOWED_DOCUMENT_EXTENSIONS = ['pdf', 'docx', 'txt']
 ALLOWED_DOCUMENT_MIME_TYPES = [
     'application/pdf',
@@ -268,7 +315,12 @@ EMBEDDING_PRELOAD       = config('EMBEDDING_PRELOAD',       default=True, cast=b
 
 GROQ_API_KEY           = config('GROQ_API_KEY', default='')
 GROQ_MODEL             = config('GROQ_MODEL', default='llama-3.3-70b-versatile')
-GROQ_MAX_OUTPUT_TOKENS = config('GROQ_MAX_OUTPUT_TOKENS', default=1024, cast=int)
+# Reads images: OCR for scanned PDF pages that have no selectable text.
+# Groq retired the llama-4 vision models this was originally built against; check
+# https://console.groq.com/docs/models before changing it, as most Groq models are
+# text-only and reject image input outright.
+GROQ_VISION_MODEL      = config('GROQ_VISION_MODEL', default='qwen/qwen3.6-27b')
+GROQ_MAX_OUTPUT_TOKENS = config('GROQ_MAX_OUTPUT_TOKENS', default=2048, cast=int)
 GROQ_TEMPERATURE       = config('GROQ_TEMPERATURE', default=0.2, cast=float)
 
 # ═══════════════════════════════════════════════════════════════
@@ -280,8 +332,8 @@ RAG_CHUNK_SIZE           = config('RAG_CHUNK_SIZE',           default=900,  cast
 RAG_CHUNK_OVERLAP        = config('RAG_CHUNK_OVERLAP',        default=200,  cast=int)
 
 # Retrieval: pull a wide candidate pool (fetch_k) then MMR-select top_k.
-RAG_TOP_K                = config('RAG_TOP_K',                default=4,    cast=int)
-RAG_FETCH_K              = config('RAG_FETCH_K',              default=20,   cast=int)
+RAG_TOP_K                = config('RAG_TOP_K',                default=6,    cast=int)
+RAG_FETCH_K              = config('RAG_FETCH_K',              default=24,   cast=int)
 RAG_USE_MMR              = config('RAG_USE_MMR',              default=True, cast=bool)
 RAG_MMR_LAMBDA           = config('RAG_MMR_LAMBDA',           default=0.7,  cast=float)
 

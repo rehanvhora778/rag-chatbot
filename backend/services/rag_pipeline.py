@@ -1,9 +1,21 @@
 """
-Module 10: RAG Pipeline
-Orchestrates: query embedding → FAISS retrieval → context building → Groq LLM → citations.
+Module 10: RAG Pipeline — the heart of the project.
+
+Answering one question runs five steps:
+    1. embed the question            (services/embeddings)
+    2. search FAISS for similar text (services/faiss_store)
+    3. load those chunks from MongoDB, keeping each one's page number
+    4. ask Groq to answer using ONLY that text  (services/llm)
+    5. save the question, the answer and its page citations to MongoDB
+
+If step 2 finds nothing relevant enough, the assistant refuses instead of
+guessing — that refusal is what keeps the answers honest.
 """
 import logging
+import time
+from datetime import timedelta
 from typing import List, Dict, Any
+
 from bson import ObjectId
 from django.conf import settings
 from django.utils import timezone
@@ -15,88 +27,85 @@ def retrieve_relevant_chunks(
     user_id: int,
     document_ids: List[str],
     query: str,
-    top_k: int = None,
 ) -> List[Dict[str, Any]]:
+    """Find the passages most similar to `query` in the given documents.
+
+    Returns one dict per passage with its text, its page number and its
+    similarity score. An empty list means nothing was relevant enough.
+    """
     from core.mongo import chunks_col, documents_col
     from services.embeddings import embed_query
     from services.faiss_store import search_multiple_indexes
 
-    top_k = top_k or settings.RAG_TOP_K
-
-    # Embed the query
-    query_embedding = embed_query(query)
-
-    # Search across all document indexes
-    raw_results = search_multiple_indexes(
+    # 1. Question -> vector, then vector -> nearest chunk ids.
+    matches = search_multiple_indexes(
         user_id=user_id,
         document_ids=document_ids,
-        query_embedding=query_embedding,
-        top_k=top_k,
+        query_embedding=embed_query(query),
+        top_k=settings.RAG_TOP_K,
     )
-
-    logger.info("FAISS search: %d document(s), %d raw results for query: '%s'",
-                len(document_ids), len(raw_results), query[:60])
-
-    if not raw_results:
-        logger.warning("No FAISS results at all. Check that document was fully processed.")
+    if not matches:
+        logger.warning("No FAISS results — check the documents finished processing.")
         return []
 
-    # Log top scores so you can tune the threshold
-    for cid, score in raw_results[:5]:
-        logger.info("  chunk=%s  score=%.4f", cid, score)
-
+    # 2. Drop weak matches. Without this floor an unrelated question would still
+    #    pull back the "least unrelated" chunk and the model might answer from it.
     min_score = settings.RAG_MIN_SIMILARITY_SCORE
-    filtered = [(cid, score) for cid, score in raw_results if score >= min_score]
-    logger.info("Score filter (>= %.3f): %d/%d chunks kept", min_score, len(filtered), len(raw_results))
-
-    if not filtered:
-        top_score = raw_results[0][1] if raw_results else 0.0
-        # Nothing is relevant enough. Do NOT force an answer from loosely-related
-        # chunks — return no context so the assistant honestly says it couldn't
-        # find the information in the uploaded documents (no hallucination).
-        logger.info(
-            "No chunk met the relevance threshold (best %.4f < %.3f). "
-            "Question is out-of-scope for these documents.",
-            top_score, min_score,
-        )
+    matches = [(cid, score) for cid, score in matches if score >= min_score]
+    if not matches:
+        logger.info("Nothing met the %.2f relevance floor — question is out of scope.", min_score)
         return []
 
-    # Fetch chunk content from MongoDB
-    chunk_ids = [ObjectId(cid) for cid, _ in filtered]
-    score_map = {cid: score for cid, score in filtered}
+    # 3. Load the chunk text and the file names they belong to.
+    chunks = {
+        str(c['_id']): c
+        for c in chunks_col().find({'_id': {'$in': [ObjectId(cid) for cid, _ in matches]}})
+    }
+    doc_ids = {c.get('document_id') for c in chunks.values() if c.get('document_id')}
+    names = {
+        str(d['_id']): d.get('original_filename', 'Unknown')
+        for d in documents_col().find(
+            {'_id': {'$in': [ObjectId(d) for d in doc_ids]}}, {'original_filename': 1}
+        )
+    }
 
-    chunks_cursor = chunks_col().find({'_id': {'$in': chunk_ids}})
-    chunks_by_id = {str(c['_id']): c for c in chunks_cursor}
-
-    # Fetch document names
-    doc_id_set = set()
-    for chunk in chunks_by_id.values():
-        doc_id_set.add(str(chunk.get('document_id', '')))
-
-    docs_cursor = documents_col().find(
-        {'_id': {'$in': [ObjectId(d) for d in doc_id_set if d]}},
-        {'original_filename': 1}
-    )
-    doc_names = {str(d['_id']): d.get('original_filename', 'Unknown') for d in docs_cursor}
-
-    # Build enriched result list ordered by score
-    enriched = []
-    for chunk_id, score in filtered:
-        chunk = chunks_by_id.get(chunk_id)
+    # 4. Rebuild in score order — best passage first, page number attached.
+    results = []
+    for chunk_id, score in matches:
+        chunk = chunks.get(chunk_id)
         if not chunk:
             continue
-        doc_name = doc_names.get(str(chunk.get('document_id', '')), 'Unknown')
-        enriched.append({
-            'chunk_id':       chunk_id,
-            'document_id':    str(chunk.get('document_id', '')),
-            'document_name':  doc_name,
-            'page_number':    chunk.get('page_number', 1),
-            'content':        chunk.get('content', ''),
+        results.append({
+            'chunk_id':         chunk_id,
+            'document_id':      str(chunk.get('document_id', '')),
+            'document_name':    names.get(str(chunk.get('document_id', '')), 'Unknown'),
+            'page_number':      chunk.get('page_number', 1),
+            'content':          chunk.get('content', ''),
             'similarity_score': score,
         })
 
-    logger.info("Returning %d enriched chunks to the LLM", len(enriched))
-    return enriched
+    logger.info("Retrieved %d passage(s) for: %s", len(results), query[:60])
+    return results
+
+
+def _build_citations(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One citation per (document, page) — this is what the UI shows as Sources."""
+    citations = []
+    seen = set()
+    for chunk in chunks:
+        key = (chunk['document_id'], chunk['page_number'])
+        if key in seen:
+            continue
+        seen.add(key)
+        excerpt = chunk['content']
+        citations.append({
+            'document_id':      chunk['document_id'],
+            'document_name':    chunk['document_name'],
+            'page_number':      chunk['page_number'],
+            'similarity_score': round(chunk['similarity_score'], 4),
+            'excerpt':          excerpt[:300] + '...' if len(excerpt) > 300 else excerpt,
+        })
+    return citations
 
 
 def run_rag_query(
@@ -105,97 +114,68 @@ def run_rag_query(
     document_ids: List[str],
     question: str,
 ) -> Dict[str, Any]:
-    import time
+    """Answer one question against a session's documents and save the exchange."""
     from core.mongo import messages_col, chat_sessions_col
     from core.constants import ROLE_USER, ROLE_ASSISTANT
     from services.llm import generate_rag_response, REFUSAL_MESSAGE
     from services.memory import get_conversation_history, summarize_history_if_long
 
-    # 1. Retrieve context (timed)
-    t0 = time.perf_counter()
-    context_chunks = retrieve_relevant_chunks(user_id, document_ids, question)
-    retrieval_ms = (time.perf_counter() - t0) * 1000
+    # --- Retrieve ---
+    started = time.perf_counter()
+    chunks = retrieve_relevant_chunks(user_id, document_ids, question)
+    retrieval_ms = (time.perf_counter() - started) * 1000
 
-    # 2. Load conversation memory
-    history = get_conversation_history(session_id)
-    history = summarize_history_if_long(history)
+    # --- Generate (with the last few turns for follow-up questions) ---
+    history = summarize_history_if_long(get_conversation_history(session_id))
 
-    # 3. Generate response (timed)
-    t1 = time.perf_counter()
-    if context_chunks:
-        answer = generate_rag_response(question, context_chunks, history)
+    started = time.perf_counter()
+    if chunks:
+        answer = generate_rag_response(question, chunks, history)
     else:
-        # No qualifying context — refuse honestly instead of hallucinating.
-        answer = REFUSAL_MESSAGE
-    generation_ms = (time.perf_counter() - t1) * 1000
+        answer = REFUSAL_MESSAGE       # nothing relevant — refuse, never invent
+    generation_ms = (time.perf_counter() - started) * 1000
 
-    logger.info(
-        "RAG timing: retrieval=%.0fms generation=%.0fms chunks=%d question='%s'",
-        retrieval_ms, generation_ms, len(context_chunks), question[:60],
-    )
+    logger.info("RAG: retrieval=%.0fms generation=%.0fms passages=%d",
+                retrieval_ms, generation_ms, len(chunks))
 
-    # 4. Build citations
-    seen = set()
-    citations = []
-    for chunk in context_chunks:
-        key = (chunk['document_id'], chunk['page_number'])
-        if key not in seen:
-            seen.add(key)
-            excerpt = chunk['content']
-            citations.append({
-                'document_id':    chunk['document_id'],
-                'document_name':  chunk['document_name'],
-                'page_number':    chunk['page_number'],
-                'similarity_score': round(chunk['similarity_score'], 4),
-                'excerpt': excerpt[:200] + '...' if len(excerpt) > 200 else excerpt,
-            })
-
+    citations = _build_citations(chunks)
     now = timezone.now()
 
-    # 5. Persist user message
-    messages_col().insert_one({
-        'session_id': session_id,
-        'user_id':    user_id,
-        'role':       ROLE_USER,
-        'content':    question,
-        'sources':    [],
-        'created_at': now,
-    })
+    # --- Save both messages so the conversation survives a refresh ---
+    # The history is read back sorted by created_at, so the answer is stamped a
+    # millisecond after the question to keep the pair in order.
+    messages_col().insert_many([
+        {'session_id': session_id, 'user_id': user_id, 'role': ROLE_USER,
+         'content': question, 'sources': [], 'created_at': now},
+        {'session_id': session_id, 'user_id': user_id, 'role': ROLE_ASSISTANT,
+         'content': answer, 'sources': citations,
+         'created_at': now + timedelta(milliseconds=1)},
+    ])
 
-    # 6. Persist assistant message
-    messages_col().insert_one({
-        'session_id': session_id,
-        'user_id':    user_id,
-        'role':       ROLE_ASSISTANT,
-        'content':    answer,
-        'sources':    citations,
-        'created_at': now,
-    })
-
-    # 7. Update session
+    # The question doubles as the sidebar preview, so a session can be
+    # recognised without loading its messages.
+    preview = question if len(question) <= 90 else question[:87] + '...'
     chat_sessions_col().update_one(
         {'_id': ObjectId(session_id)},
-        {'$inc': {'message_count': 2}, '$set': {'last_message_at': now, 'updated_at': now}},
+        {'$inc': {'message_count': 2},
+         '$set': {'last_message_at': now, 'updated_at': now,
+                  'last_message_preview': preview}},
     )
-
-    # Debug payload — surfaced by the API only when debug mode is on.
-    debug = {
-        'retrieval_ms':  round(retrieval_ms, 1),
-        'generation_ms': round(generation_ms, 1),
-        'retrieved_chunks': [
-            {
-                'document_name':    c['document_name'],
-                'page_number':      c['page_number'],
-                'similarity_score': round(c['similarity_score'], 4),
-                'preview':          c['content'][:200] + ('...' if len(c['content']) > 200 else ''),
-            }
-            for c in context_chunks
-        ],
-    }
 
     return {
         'answer':           answer,
         'citations':        citations,
-        'chunks_retrieved': len(context_chunks),
-        'debug':            debug,
+        'chunks_retrieved': len(chunks),
+        # Only surfaced by the API when RAG_DEBUG is on.
+        'debug': {
+            'retrieval_ms':  round(retrieval_ms, 1),
+            'generation_ms': round(generation_ms, 1),
+            'retrieved_chunks': [
+                {'document_name':    c['document_name'],
+                 'page_number':      c['page_number'],
+                 'similarity_score': round(c['similarity_score'], 4),
+                 'preview':          c['content'][:200]}
+                for c in chunks
+            ],
+        },
     }

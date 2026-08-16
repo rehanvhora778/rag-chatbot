@@ -65,6 +65,9 @@ def analytics_col() -> Collection:
 def summaries_col() -> Collection:
     return get_collection(settings.MONGO_COLLECTIONS['DOCUMENT_SUMMARIES'])
 
+def otps_col() -> Collection:
+    return get_collection(settings.MONGO_COLLECTIONS['OTPS'])
+
 
 def create_indexes() -> None:
     """Create all MongoDB indexes. Safe to call repeatedly."""
@@ -86,6 +89,11 @@ def create_indexes() -> None:
 
         analytics_col().create_index([('user_id', ASCENDING)])
         analytics_col().create_index([('created_at', DESCENDING)])
+
+        # One live code per email per flow, and let Mongo sweep away spent
+        # records on its own so nothing has to run a cleanup job.
+        otps_col().create_index([('email', ASCENDING), ('purpose', ASCENDING)], unique=True)
+        otps_col().create_index([('purge_at', ASCENDING)], expireAfterSeconds=0)
 
         logger.info("MongoDB indexes created/verified.")
     except Exception as exc:

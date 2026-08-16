@@ -10,7 +10,7 @@ export default function PrivacyPage() {
     <LegalLayout
       title="Privacy Policy"
       updated="June 27, 2026"
-      intro="This Privacy Policy explains what information Nexus RAG collects when you create an account and use the app, how that information is used, and the choices you have. Nexus RAG is an academic / portfolio project built to demonstrate Retrieval-Augmented Generation — it is not a commercial service."
+      intro="This Privacy Policy explains what information RAG Chatbot collects when you create an account and use the app, how that information is used, and the choices you have. RAG Chatbot is an academic / portfolio project built to demonstrate Retrieval-Augmented Generation — it is not a commercial service."
       sections={[
         {
           heading: '1. Information we collect',
