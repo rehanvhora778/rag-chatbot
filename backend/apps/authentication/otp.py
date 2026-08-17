@@ -109,8 +109,9 @@ def _subject_and_body(code: str, purpose: str, name: str = '') -> tuple:
 
 def _send(email: str, code: str, purpose: str, name: str = '') -> None:
     """
-    Mail the code. With no SMTP credentials configured Django's console backend
-    prints it to the runserver terminal, which keeps the flow usable offline.
+    Mail the code. With no mail transport configured Django's console backend
+    prints it to the server log, which keeps the flow usable offline — and on
+    Render's free tier, where outbound SMTP is blocked outright.
     """
     subject, body = _subject_and_body(code, purpose, name)
     try:
@@ -122,6 +123,13 @@ def _send(email: str, code: str, purpose: str, name: str = '') -> None:
             'and try again.',
             status_code=503,
         )
+
+    # The console backend has already dumped the whole message to the log, so
+    # this repeats nothing that is not there — it just makes the code greppable
+    # instead of buried in a full RFC-822 dump. Only ever runs when no real
+    # transport is configured; with SMTP or an API backend nothing is logged.
+    if settings.EMAIL_BACKEND.endswith('console.EmailBackend'):
+        logger.info("OTP (%s) for %s: %s", purpose, email, code)
 
 
 def _check_rate_limits(record) -> None:
