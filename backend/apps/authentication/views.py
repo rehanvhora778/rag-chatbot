@@ -20,20 +20,25 @@ from .serializers import (
     get_or_create_google_user,
 )
 
+logger = logging.getLogger(__name__)
+
 # Imported at module scope on purpose. `google.auth.transport.requests` imports
 # `google.oauth2` on its way in, so the two form a cycle; resolving it lazily
 # inside a request handler can hand back a half-built module and fail with
 # "partially initialized module ... has no attribute 'Request'". Importing once
 # at startup makes the order deterministic and single-threaded.
-# None means google-auth is not installed — GoogleLoginView reports that as 503.
+#
+# Both stay None if the import fails, and GoogleLoginView reports that as 503.
+# The reason is logged with a traceback rather than swallowed: a silent failure
+# here looks identical to "google-auth isn't installed", which sent a previous
+# debugging session down the wrong path.
 try:
     from google.auth.transport import requests as google_requests
     from google.oauth2 import id_token as google_id_token
-except ImportError:
+except Exception:
     google_requests = None
     google_id_token = None
-
-logger = logging.getLogger(__name__)
+    logger.exception("Google sign-in disabled: could not import google-auth")
 
 
 def _session_payload(user):
