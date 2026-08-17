@@ -97,8 +97,11 @@ def process_document(document_id: str, user_id: int, file_path: str, file_type: 
         if not chunks:
             raise ValueError("Chunking produced no results.")
 
+        logger.info("%s: %d chunks, embedding…", filename or document_id, len(chunks))
+
         # --- 3. Vectors ---
         embeddings = embed_chunks(chunks)
+        logger.info("%s: embedded %d chunks, indexing…", filename or document_id, len(chunks))
 
         # --- 4. Store: chunk text in MongoDB, vectors in FAISS ---
         # Each chunk keeps its page_number — that is what lets an answer cite

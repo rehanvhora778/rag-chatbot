@@ -22,6 +22,41 @@ _backend_lock = threading.Lock()
 _MAX_SEQ_LENGTH = 256
 
 
+def _usable_cores() -> int:
+    """How many cores this process may actually use.
+
+    os.cpu_count() reports the *host's* cores, not the container's limit. A
+    Render free instance is capped at 0.15 CPU while the host reports 8+, and
+    giving ONNX Runtime that many intra-op threads makes them fight over a
+    fraction of a core: embedding stops finishing rather than failing, so an
+    upload sits in "processing" forever with nothing in the log. The cgroup
+    quota is the number that matters inside a container.
+    """
+    import os
+
+    # cgroup v2 — "<quota> <period>", or "max <period>" when unlimited.
+    try:
+        with open('/sys/fs/cgroup/cpu.max') as fh:
+            quota, period = fh.read().split()
+        if quota != 'max':
+            return max(1, round(int(quota) / int(period)))
+    except Exception:
+        pass
+
+    # cgroup v1
+    try:
+        with open('/sys/fs/cgroup/cpu/cpu.cfs_quota_us') as fh:
+            quota = int(fh.read())
+        with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us') as fh:
+            period = int(fh.read())
+        if quota > 0:
+            return max(1, round(quota / period))
+    except Exception:
+        pass
+
+    return os.cpu_count() or 1
+
+
 class _OnnxBackend:
     """MiniLM-style bi-encoder on ONNX Runtime (mean pooling + L2 norm)."""
 
@@ -49,7 +84,8 @@ class _OnnxBackend:
             providers = ['DmlExecutionProvider', 'CPUExecutionProvider']
         else:
             providers = ['CPUExecutionProvider']
-            so.intra_op_num_threads = os.cpu_count() or 4
+            so.intra_op_num_threads = _usable_cores()
+            logger.info("ONNX intra-op threads: %d", so.intra_op_num_threads)
         self.session = ort.InferenceSession(model_path, so, providers=providers)
         self.input_names = {i.name for i in self.session.get_inputs()}
         self.device = 'DirectML GPU' if 'DmlExecutionProvider' in self.session.get_providers() else 'CPU'
