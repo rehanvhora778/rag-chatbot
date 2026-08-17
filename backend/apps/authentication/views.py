@@ -20,6 +20,19 @@ from .serializers import (
     get_or_create_google_user,
 )
 
+# Imported at module scope on purpose. `google.auth.transport.requests` imports
+# `google.oauth2` on its way in, so the two form a cycle; resolving it lazily
+# inside a request handler can hand back a half-built module and fail with
+# "partially initialized module ... has no attribute 'Request'". Importing once
+# at startup makes the order deterministic and single-threaded.
+# None means google-auth is not installed — GoogleLoginView reports that as 503.
+try:
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token as google_id_token
+except ImportError:
+    google_requests = None
+    google_id_token = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -295,10 +308,7 @@ class GoogleLoginView(APIView):
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        try:
-            from google.auth.transport import requests as google_requests
-            from google.oauth2 import id_token as google_id_token
-        except ImportError:
+        if google_id_token is None:
             return APIResponse.error(
                 'Google sign-in requires the `google-auth` package (pip install -r requirements.txt).',
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -312,6 +322,14 @@ class GoogleLoginView(APIView):
             logger.warning("Rejected Google credential: %s", exc)
             return APIResponse.error('Could not verify that Google account.',
                                      status_code=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # A transport or library fault is our problem, not a bad credential,
+            # so it gets logged with a traceback instead of a bare 500.
+            logger.exception("Google credential verification failed unexpectedly")
+            return APIResponse.error(
+                'Could not reach Google to verify that account. Please try again.',
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         if not info.get('email_verified'):
             return APIResponse.error('That Google account has no verified email address.',
