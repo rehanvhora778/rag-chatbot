@@ -175,10 +175,23 @@ EMAIL_TIMEOUT       = 15                       # never hang a request on a dead 
 DEFAULT_FROM_EMAIL  = config('DEFAULT_FROM_EMAIL',
                              default=EMAIL_HOST_USER or 'RAG Chatbot <no-reply@localhost>')
 
-# Without SMTP credentials the codes are printed to the runserver console
-# instead of being mailed, so the whole OTP flow still works offline.
-EMAIL_BACKEND = ('django.core.mail.backends.smtp.EmailBackend' if EMAIL_HOST_USER
-                 else 'django.core.mail.backends.console.EmailBackend')
+# Brevo's HTTP API, used when a key is present. Render's free instances have no
+# outbound SMTP — smtp.gmail.com:587 fails with "[Errno 101] Network is
+# unreachable" however correct the App Password is — so SMTP cannot deliver in
+# production at all. HTTPS is not blocked.
+BREVO_API_KEY = config('BREVO_API_KEY', default='')
+
+# Preference order:
+#   1. Brevo over HTTPS   — set BREVO_API_KEY (production)
+#   2. SMTP               — set EMAIL_HOST_USER (local development)
+#   3. Console            — neither set: codes are printed instead of mailed,
+#                           so the OTP flow still works offline.
+if BREVO_API_KEY:
+    EMAIL_BACKEND = 'core.email_backends.BrevoAPIEmailBackend'
+elif EMAIL_HOST_USER:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 # ═══════════════════════════════════════════════════════════════
 # OTP — one-time codes (stored in MongoDB, never in plaintext)
