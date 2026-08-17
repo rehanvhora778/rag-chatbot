@@ -13,9 +13,10 @@ class DocumentsConfig(AppConfig):
         Two things happen here, both only in a process that actually serves
         requests (management commands like migrate/shell are skipped):
 
-          1. numpy is imported on this, the main thread. Uploads are processed
-             in background threads, so without this the first two of them can
-             race to import numpy and one crashes on a half-built module.
+          1. numpy and the urllib3/requests stack are imported on this, the
+             main thread. Uploads are processed in background threads, so
+             without this the first two of them can race to import a package
+             and one crashes on a half-built module.
           2. The embedding model is warmed in the background, so the first
              upload or chat message doesn't wait for it to load.
         """
@@ -35,8 +36,11 @@ class DocumentsConfig(AppConfig):
 
         # Step 1 runs whether or not the preload is enabled — the thread race it
         # prevents comes from concurrent uploads, not from the preload alone.
-        from services.embeddings import ensure_numpy_loaded, preload_embedding_model_async
+        from services.embeddings import (
+            ensure_numpy_loaded, ensure_http_stack_loaded, preload_embedding_model_async,
+        )
         ensure_numpy_loaded()
+        ensure_http_stack_loaded()
 
         if getattr(settings, 'EMBEDDING_PRELOAD', True):
             preload_embedding_model_async()

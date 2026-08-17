@@ -225,11 +225,35 @@ def ensure_numpy_loaded():
     import numpy  # noqa: F401
 
 
+def ensure_http_stack_loaded():
+    """Import urllib3/requests on the calling thread, before any worker thread can.
+
+    Exactly the same hazard as ensure_numpy_loaded(), one layer down. urllib3's
+    package initialisation imports its own submodules, so a second thread
+    importing it mid-flight sees a half-built module and dies with
+
+        cannot import name 'HTTPConnectionPool' from partially initialized
+        module 'urllib3.connectionpool' (most likely due to a circular import)
+
+    Three things race for this stack the moment a server process starts: the
+    embedding preload thread (huggingface_hub -> requests -> urllib3), the
+    Google sign-in import in apps.authentication.views (google-auth ->
+    requests -> urllib3), and the Groq client. Whichever loses the race takes
+    its feature down for the whole process lifetime — Google sign-in came back
+    503 "google-auth is not installed" when it was in fact installed and fine.
+
+    Importing it once here, on the main thread, makes the race impossible.
+    """
+    import urllib3   # noqa: F401
+    import requests  # noqa: F401
+
+
 def preload_embedding_model_async():
     """Warm the embedding model in a daemon thread so the first upload or chat
     message doesn't pay the model-load cost."""
     # Must happen here, on the caller's thread — not inside _load(). See above.
     ensure_numpy_loaded()
+    ensure_http_stack_loaded()
 
     def _load():
         try:
