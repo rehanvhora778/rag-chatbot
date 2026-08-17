@@ -85,7 +85,19 @@ class _OnnxBackend:
         else:
             providers = ['CPUExecutionProvider']
             so.intra_op_num_threads = _usable_cores()
-            logger.info("ONNX intra-op threads: %d", so.intra_op_num_threads)
+            so.inter_op_num_threads = 1
+            so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+
+            # ONNX Runtime's thread pools busy-wait before parking. That is a
+            # throughput win on a dedicated box and a disaster on a CPU-capped
+            # container: the spinning threads burn the whole cgroup quota, the
+            # scheduler throttles the process, and the thread doing the actual
+            # inference barely advances. On a 0.15 CPU Render instance a single
+            # batch of six short chunks never finished.
+            so.add_session_config_entry('session.intra_op.allow_spinning', '0')
+            so.add_session_config_entry('session.inter_op.allow_spinning', '0')
+
+            logger.info("ONNX intra-op threads: %d (spinning off)", so.intra_op_num_threads)
         self.session = ort.InferenceSession(model_path, so, providers=providers)
         self.input_names = {i.name for i in self.session.get_inputs()}
         self.device = 'DirectML GPU' if 'DmlExecutionProvider' in self.session.get_providers() else 'CPU'
