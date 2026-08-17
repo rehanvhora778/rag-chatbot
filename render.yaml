@@ -9,10 +9,13 @@
 
 services:
   - type: web
-    name: rag-chatbot-api
+    # Name and region must match the existing service exactly — Render cannot
+    # rename or move a service through a Blueprint, and a mismatch makes the
+    # sync fail without applying anything.
+    name: rag-chatbot-backend
     runtime: python
     plan: free
-    region: singapore          # closest free region to India; also: oregon, frankfurt
+    region: oregon             # also: singapore, frankfurt
     rootDir: backend
     # `bash ./build.sh`, not `./build.sh` — git on Windows does not preserve the
     # executable bit, so calling bash directly avoids a "permission denied" build.
