@@ -11,11 +11,19 @@ by Groq's vision model (OCR) before being indexed like any other page.
 
 ```
 question -> embed -> FAISS search -> top passages (with page numbers)
-         -> Groq Llama 3.3 70B -> answer + page citations
+         -> Groq (gpt-oss-120b) -> answer + page citations
 ```
 
 **Stack:** Django REST Framework · MongoDB · FAISS (vector search) ·
-Sentence-Transformers embeddings · Groq (Llama 3.3 70B) · React + Vite + Tailwind
+ONNX Runtime embeddings (all-MiniLM-L6-v2) · Groq (openai/gpt-oss-120b) ·
+React + Vite + Tailwind
+
+> Groq retires models without notice — `llama-3.3-70b-versatile`, used here
+> originally, now returns `404 model_not_found`, and no Llama chat model remains
+> on Groq. `GROQ_MODEL` is therefore worth checking against
+> [Groq's model list](https://console.groq.com/docs/models) if answers start
+> failing. The `openai/` prefix names who published the weights; inference still
+> runs entirely on Groq.
 
 ## Project structure
 

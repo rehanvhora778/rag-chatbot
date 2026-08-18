@@ -11,8 +11,17 @@ Three free services, each doing the thing it is best at:
 ```
 Browser ──> Vercel (React)  ──HTTPS──>  Render (Django API)  ──>  MongoDB Atlas
                                               │
-                                              └──>  Groq API (Llama 3.3 70B)
+                                              └──>  Groq API (gpt-oss-120b)
 ```
+
+> **`GROQ_MODEL` is pinned in `render.yaml`.** Groq retires models without
+> notice and the failure is quiet: `llama-3.3-70b-versatile` began returning
+> `404 model_not_found`, which broke chat answers and left every document
+> summary reading *"Summary could not be generated."* No Llama chat model
+> remains on Groq. If answers start failing, check
+> [Groq's model list](https://console.groq.com/docs/models) first. Note that
+> `qwen/qwen3.6-27b` is available but unsuitable as the chat model — it emits
+> its `<think>` reasoning into the reply body; it is used only for vision OCR.
 
 Deploy in this order — each step needs a URL from the one before it.
 
@@ -24,8 +33,15 @@ Have these ready:
 
 - The project pushed to a **GitHub** repository
 - A **Groq API key** — https://console.groq.com/keys
-- A **Gmail App Password** for the OTP emails — https://myaccount.google.com/apppasswords
-  (requires 2-Step Verification on the account)
+
+> **OTP email does not work on Render's free tier, and no Gmail App Password
+> will fix it.** Free instances have no outbound SMTP: `smtp.gmail.com:587`
+> fails with `[Errno 101] Network is unreachable`. Leave `EMAIL_HOST_USER`
+> blank and Django falls back to the console backend, which prints the code
+> into the service log — search the Render logs for `OTP` and read it from
+> there. For real delivery you need either a paid instance (SMTP is allowed) or
+> an HTTP email API; `BREVO_API_KEY` is already wired up for the latter and
+> takes precedence over the SMTP settings when set.
 
 > **Rotate your keys first.** The Groq key and Gmail App Password currently in
 > `backend/.env` have been sitting on disk. `.env` is gitignored so they are not
@@ -75,8 +91,8 @@ Have these ready:
    |---|---|
    | `MONGODB_HOST` | the Atlas string from Step 1 |
    | `GROQ_API_KEY` | your Groq key |
-   | `EMAIL_HOST_USER` | your Gmail address |
-   | `EMAIL_HOST_PASSWORD` | the 16-character App Password, no spaces |
+   | `EMAIL_HOST_USER` | **leave blank** — SMTP is blocked on the free tier, see the note above |
+   | `EMAIL_HOST_PASSWORD` | leave blank |
    | `DEFAULT_ADMIN_EMAIL` | the admin account to create |
    | `DEFAULT_ADMIN_PASSWORD` | a strong password |
    | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` for now — fixed in Step 4 |
@@ -151,7 +167,7 @@ that origin is allowed.
    ```
 
 3. Open your Vercel URL and check the whole flow:
-   - Register → the OTP email arrives → account created
+   - Register → read the code from the Render log (search `OTP`) → account created
    - Upload a PDF → status reaches **Ready**
    - Ask a question → answer comes back with `(Page N)` citations
    - Sign in at `/admin-login` with your `DEFAULT_ADMIN_EMAIL`
@@ -173,13 +189,30 @@ free tier has no persistent storage, and three things live on disk:
 | Lost on restart | Consequence |
 |---|---|
 | Uploaded PDFs (`media/`) | The original file is gone |
-| FAISS indexes (`indexes/`) | Old documents can no longer be searched |
+| FAISS indexes (`indexes/`) | Rebuilt automatically — see below |
 | `db.sqlite3` — Django's user table | **Registered accounts are gone** |
 
 MongoDB keeps every document record, chunk, and chat message, so the app does
-not break — but a document uploaded yesterday cannot be queried today, and users
-must register again. The admin account survives because `build.sh` re-creates it
-on every deploy.
+not break. Users must register again; the admin account survives because
+`build.sh` re-creates it on every deploy.
+
+**The FAISS indexes repair themselves.** Losing them used to be the worst of
+these: the document still appeared in the sidebar marked "completed", but with
+no index there was nothing to retrieve, so *every* question came back "I could
+not find an answer to your question in the uploaded document(s)" — a refusal
+that looked like a broken model rather than a missing file. Each chunk's vector
+is now stored in MongoDB next to its text, and `faiss_store.rebuild_index`
+writes the index back from those vectors the first time a question touches a
+document whose index is gone. It is a copy, not a recompute, so it costs a
+second or so and the answer arrives normally.
+
+Two things to know about it:
+- Documents uploaded *before* this change have no stored vectors, so their
+  first rebuild re-embeds the text instead. That is slow on a throttled free
+  instance and a large document can exceed the 180s request timeout. Re-upload
+  anything from before to move it onto the fast path.
+- The original PDF is still gone, so downloading the source file will not work
+  even though questions do.
 
 For a viva demo this is usually fine: upload your PDF at the start of the
 session and everything works. To make it permanent, either
@@ -225,6 +258,21 @@ must be a Gmail *App Password*, not your account password.
 **First question after a deploy is very slow**
 Expected. The instance is waking and loading the embedding model. Subsequent
 questions are fast.
+
+**Every answer is "I could not find an answer to your question in the uploaded
+document(s)"**
+The document is listed and marked completed, but its FAISS index was wiped by a
+restart, so retrieval returns nothing and the pipeline refuses rather than
+guessing. This now repairs itself — the index is rebuilt from the vectors kept
+in MongoDB on the next question. If you still see it, check the Render log for
+`Rebuilding lost FAISS index`:
+- `no chunks in MongoDB` means processing never finished for that document —
+  upload it again.
+- A rebuild that starts but never logs `Rebuilt index` is the slow re-embedding
+  path on a document uploaded before vectors were stored. Re-upload it.
+- No rebuild line at all means the index is present and the documents genuinely
+  do not contain the answer. Confirm with `RAG_DEBUG=true`, which returns the
+  retrieved passages and their similarity scores with the answer.
 
 ---
 
