@@ -10,7 +10,6 @@ export const NAV_LINKS = [
   { id: 'features',    label: 'Features' },
   { id: 'how-it-works', label: 'How It Works' },
   { id: 'about',       label: 'About' },
-  { id: 'docs',        label: 'Docs' },
 ]
 
 /** Tracks which section is under the navbar so its link can light up. */

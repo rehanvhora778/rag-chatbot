@@ -4,7 +4,6 @@ import FeatureStrip from '../components/home/FeatureStrip'
 import Features from '../components/home/Features'
 import HowItWorks from '../components/home/HowItWorks'
 import About from '../components/home/About'
-import Docs from '../components/home/Docs'
 import HomeFooter from '../components/home/HomeFooter'
 
 export default function LandingPage() {
@@ -17,7 +16,6 @@ export default function LandingPage() {
         <Features />
         <HowItWorks />
         <About />
-        <Docs />
       </main>
       <HomeFooter />
     </div>
