@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { User, Settings as SettingsIcon, LogOut, ChevronsUpDown, ShieldCheck, LayoutDashboard } from 'lucide-react'
+import { User, LogOut, ChevronsUpDown, ShieldCheck, LayoutDashboard } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../../contexts/AuthContext'
 import { cn } from '../../lib/utils'
@@ -116,9 +116,6 @@ export default function UserMenu({ collapsed = false, onNavigate, align = 'up' }
               </button>
               <button role="menuitem" onClick={() => go('/profile')} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-zinc-300 transition-colors hover:bg-primary-500/10 hover:text-primary-200">
                 <User size={14} className="text-zinc-500" /> Profile
-              </button>
-              <button role="menuitem" onClick={() => go('/settings')} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-zinc-300 transition-colors hover:bg-primary-500/10 hover:text-primary-200">
-                <SettingsIcon size={14} className="text-zinc-500" /> Settings
               </button>
               {user?.is_staff && (
                 <button role="menuitem" onClick={() => go('/admin')} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-zinc-300 transition-colors hover:bg-primary-500/10 hover:text-primary-200">

@@ -8,7 +8,6 @@ const pageTitles = {
   '/chat':           { title: 'RAG Chatbot',    sub: 'Ask anything about your documents' },
   '/documents':      { title: 'Documents',      sub: 'Manage your knowledge base' },
   '/analytics':      { title: 'Analytics',      sub: 'Usage insights' },
-  '/settings':       { title: 'Settings',       sub: 'How your documents are read and answered' },
   '/profile':        { title: 'Profile',        sub: 'Manage your account' },
   '/admin':          { title: 'Admin Panel',    sub: 'System management' },
 }

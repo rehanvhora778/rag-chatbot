@@ -23,7 +23,6 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const DocumentsPage = lazy(() => import('./pages/DocumentsPage'))
 const ChatPage      = lazy(() => import('./pages/ChatPage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
-const SettingsPage  = lazy(() => import('./pages/SettingsPage'))
 const AdminPage     = lazy(() => import('./pages/AdminPage'))
 const ProfilePage   = lazy(() => import('./pages/ProfilePage'))
 const Layout        = lazy(() => import('./components/common/Layout'))
@@ -71,7 +70,6 @@ export default function App() {
           <Route path="/chat"       element={<ChatPage />} />
           <Route path="/chat/:sessionId" element={<ChatPage />} />
           <Route path="/analytics"  element={<AnalyticsPage />} />
-          <Route path="/settings"   element={<SettingsPage />} />
           <Route path="/profile"    element={<ProfilePage />} />
           <Route path="/admin"      element={<AdminRoute><AdminPage /></AdminRoute>} />
         </Route>

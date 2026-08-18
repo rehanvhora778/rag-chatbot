@@ -222,10 +222,7 @@ export default function ChatRightPanel({
             <InfoRow label="Embedding" value={config.embedding_model} />
             <InfoRow label="Passages"  value={`Top ${config.retrieval.top_k} per question`} />
             <p className="pt-1 text-[10.5px] leading-relaxed text-zinc-600">
-              Configured on the server, so every conversation answers the same way.{' '}
-              <Link to="/settings" className="text-primary-400 hover:text-primary-300">
-                Full configuration
-              </Link>
+              Configured on the server, so every conversation answers the same way.
             </p>
           </div>
         )}

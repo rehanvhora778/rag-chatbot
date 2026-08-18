@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   FileText, MessageSquare, BarChart2,
-  Settings as SettingsIcon, ShieldCheck, Plus, ChevronRight, Clock,
+  ShieldCheck, Plus, ChevronRight, Clock,
   PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
@@ -18,7 +18,6 @@ const navItems = [
   { to: '/chat',      label: 'Chats',     icon: MessageSquare },
   { to: '/documents', label: 'Documents', icon: FileText },
   { to: '/analytics', label: 'Analytics', icon: BarChart2 },
-  { to: '/settings',  label: 'Settings',  icon: SettingsIcon },
 ]
 
 const adminItems = [{ to: '/admin', label: 'Admin Panel', icon: ShieldCheck }]
