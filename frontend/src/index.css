@@ -123,6 +123,21 @@
            transition-all duration-200 backdrop-blur-sm;
   }
 
+  /* A <select>'s drop-down list is painted by the operating system, not by the
+     page, so it ignored the dark surface above: the options inherited
+     text-zinc-100 onto the OS's white popup and came out white on white,
+     unreadable. color-scheme tells the browser to draw its native controls
+     dark, and the explicit option colours cover the platforms that ignore it.
+     bg-white/[0.03] is translucent and cannot be used on an option — a popup
+     needs an opaque background — hence the solid ink-800. */
+  select.input-field {
+    color-scheme: dark;
+  }
+
+  select.input-field option {
+    @apply bg-ink-800 text-zinc-100;
+  }
+
   /* ── Surfaces ── */
   .card {
     @apply rounded-2xl border border-white/[0.06] bg-ink-800/70 backdrop-blur-xl shadow-card;
