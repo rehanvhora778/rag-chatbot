@@ -62,5 +62,16 @@ services:
         value: onnx                  # torch is not installed in production
       - key: EMBEDDING_ONNX_PROVIDER
         value: cpu                   # no GPU on Render
+
+      # Must stay false here. With the preload on, the ONNX session is built in
+      # a short-lived background thread at startup and then run() is called from
+      # the upload thread, which deadlocks: uploads sit at "processing" forever,
+      # with no exception, no error log and no failed status. Even a one-chunk
+      # document never returns. Loading the model lazily means the session is
+      # created and used on the same thread. Cost is ~20s on the first upload
+      # after a restart, while it loads.
+      - key: EMBEDDING_PRELOAD
+        value: "false"
+
       - key: DEFAULT_FROM_EMAIL
         value: RAG Chatbot <no-reply@localhost>
