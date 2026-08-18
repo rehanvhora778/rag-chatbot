@@ -3,17 +3,6 @@ import { ArrowRight, GraduationCap, Mail } from 'lucide-react'
 import { CARD, CARD_HOVER, Reveal, Section, SectionHeading } from './primitives'
 import { PROJECT, AUTHOR } from '../landing/portfolio'
 
-// Grouped by layer rather than one flat row of chips — it reads as an
-// architecture summary instead of a keyword list, which is the question an
-// examiner actually asks. Kept accurate to what production runs: embeddings go
-// through ONNX Runtime, not sentence-transformers.
-const STACK = [
-  { group: 'Frontend', items: ['React + Vite', 'Tailwind CSS', 'Framer Motion'] },
-  { group: 'Backend',  items: ['Django REST', 'JWT Auth', 'Gunicorn'] },
-  { group: 'Data',     items: ['MongoDB', 'FAISS'] },
-  { group: 'AI',       items: ['Groq LLM', 'ONNX Runtime', 'all-MiniLM-L6-v2'] },
-]
-
 export default function About() {
   return (
     <Section id="about" className="pb-28">
@@ -23,69 +12,44 @@ export default function About() {
         subtitle={`${PROJECT.name} is a ${PROJECT.type.toLowerCase()} from ${PROJECT.college} — a working demonstration of Retrieval-Augmented Generation end to end.`}
       />
 
-      <div className="mt-14 grid gap-5 lg:grid-cols-12">
-        {/* Profile */}
-        <Reveal className="lg:col-span-5">
-          <article className={`${CARD} ${CARD_HOVER} flex h-full flex-col p-8`}>
-            <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-300 to-primary-600 font-display text-2xl font-bold text-ink-950">
-              {AUTHOR.name[0]}
-            </span>
+      {/* One author, so this is a single horizontal card capped at max-w-3xl
+          rather than a card stranded in one column of a wider grid. */}
+      <div className="mt-14 flex justify-center">
+        <Reveal className="w-full max-w-3xl">
+          <article className={`${CARD} ${CARD_HOVER} p-8 sm:p-10`}>
+            <div className="flex flex-col gap-7 sm:flex-row sm:items-start sm:gap-8">
+              <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-300 to-primary-600 font-display text-3xl font-bold text-ink-950">
+                {AUTHOR.name[0]}
+              </span>
 
-            <h3 className="mt-6 font-display text-2xl font-bold tracking-tight text-white">
-              {AUTHOR.name}
-            </h3>
-            <p className="mt-1 text-sm font-semibold text-primary-400">{AUTHOR.subtitle}</p>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-display text-2xl font-bold tracking-tight text-white">
+                  {AUTHOR.name}
+                </h3>
+                <p className="mt-1 text-sm font-semibold text-primary-400">{AUTHOR.subtitle}</p>
 
-            <p className="mt-5 text-sm leading-relaxed text-zinc-400">{AUTHOR.role}</p>
+                <p className="mt-5 text-[15px] leading-relaxed text-zinc-400">{AUTHOR.role}</p>
 
-            <div className="mt-auto pt-8">
-              <p className="flex items-center gap-2 border-t border-white/[0.07] pt-6 text-sm text-zinc-500">
-                <GraduationCap size={16} className="shrink-0 text-primary-400" />
-                {PROJECT.department} · {PROJECT.college}
-              </p>
-              <a
-                href={`mailto:${PROJECT.email}`}
-                className="mt-5 inline-flex items-center gap-2 rounded-xl border border-white/12 px-4 py-2.5 text-sm font-semibold text-zinc-200 transition-colors hover:border-primary-500/40 hover:text-white"
-              >
-                <Mail size={15} /> Get in touch
-              </a>
-            </div>
-          </article>
-        </Reveal>
-
-        {/* Stack */}
-        <Reveal delay={0.08} className="lg:col-span-7">
-          <article className={`${CARD} h-full p-8`}>
-            <h3 className="font-display text-xl font-semibold text-white">Under the hood</h3>
-            <p className="mt-2 text-sm leading-relaxed text-zinc-500">
-              Every layer built and deployed from scratch — no hosted RAG service in between.
-            </p>
-
-            <dl className="mt-8 space-y-6">
-              {STACK.map(({ group, items }) => (
-                <div key={group} className="sm:flex sm:items-baseline sm:gap-6">
-                  <dt className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                    {group}
-                  </dt>
-                  <dd className="mt-2 flex flex-wrap gap-2 sm:mt-0">
-                    {items.map(t => (
-                      <span
-                        key={t}
-                        className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-zinc-300"
-                      >
-                        {t}
-                      </span>
-                    ))}
-                  </dd>
+                <div className="mt-7 flex flex-col gap-5 border-t border-white/[0.07] pt-6 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="flex items-center gap-2 text-sm text-zinc-500">
+                    <GraduationCap size={16} className="shrink-0 text-primary-400" />
+                    {PROJECT.department} · {PROJECT.college}
+                  </p>
+                  <a
+                    href={`mailto:${PROJECT.email}`}
+                    className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl border border-white/12 px-4 py-2.5 text-sm font-semibold text-zinc-200 transition-colors hover:border-primary-500/40 hover:text-white sm:self-auto"
+                  >
+                    <Mail size={15} /> Get in touch
+                  </a>
                 </div>
-              ))}
-            </dl>
+              </div>
+            </div>
           </article>
         </Reveal>
       </div>
 
       {/* Closing call to action — the page used to end on the Docs section, so
-          this keeps a way in rather than trailing off after the stack list. */}
+          this keeps a way in rather than trailing off after the profile. */}
       <Reveal delay={0.1}>
         <div className={`${CARD} mt-10 flex flex-col items-center gap-5 p-10 text-center`}>
           <h3 className="font-display text-2xl font-bold text-white sm:text-3xl">
