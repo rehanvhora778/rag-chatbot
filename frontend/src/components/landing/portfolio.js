@@ -12,16 +12,12 @@ export const PROJECT = {
   email: 'rehanvhora86@gmail.com',      // contact shown on legal pages
 }
 
-// Group members shown in the "Our Team" section — EDIT names, IDs and roles.
-export const TEAM = [
-  { name: 'Rayhan Vora', enrollment: 'Enrollment No. TODO', role: 'Backend & RAG Pipeline' },
-  { name: 'Nikhil',      enrollment: 'Enrollment No. TODO', role: 'Frontend Development' },
-  { name: 'Mansi',       enrollment: 'Enrollment No. TODO', role: 'Database, Testing & Documentation' },
-]
-
-// "Rayhan, Nikhil & Mansi" — used on the auth brand panel.
-export const TEAM_NAMES = TEAM.map(m => m.name.split(' ')[0])
-  .reduce((acc, n, i, arr) => (i === 0 ? n : i === arr.length - 1 ? `${acc} & ${n}` : `${acc}, ${n}`), '')
+// Shown in the About section.
+export const AUTHOR = {
+  name: 'Rayhan Vora',
+  subtitle: 'AI & Data Science Student',
+  role: 'Full-stack development, RAG pipeline and deployment',
+}
 
 // Where "Launch Application" sends a logged-out visitor
 export const APP_ENTRY = '/register'

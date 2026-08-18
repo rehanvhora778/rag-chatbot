@@ -1,6 +1,6 @@
 import { GraduationCap, Github, Mail } from 'lucide-react'
 import { CARD, CARD_HOVER, Reveal, Section, SectionHeading } from './primitives'
-import { PROJECT, TEAM } from '../landing/portfolio'
+import { PROJECT, AUTHOR } from '../landing/portfolio'
 
 const STACK = [
   'React + Vite', 'Tailwind CSS', 'Django REST', 'MongoDB',
@@ -11,28 +11,28 @@ export default function About() {
   return (
     <Section id="about">
       <SectionHeading
-        eyebrow="About Us"
-        title="Built by students, for readers"
+        eyebrow="About"
+        title={`Built by ${AUTHOR.name}`}
         subtitle={`${PROJECT.name} is a ${PROJECT.type.toLowerCase()} from ${PROJECT.college} — a working demonstration of Retrieval-Augmented Generation end to end.`}
       />
 
-      <div className="mt-14 grid gap-5 lg:grid-cols-3">
-        {TEAM.map((member, i) => (
-          <Reveal key={member.name} delay={i * 0.08}>
-            <article className={`${CARD} ${CARD_HOVER} h-full p-6`}>
-              <div className="flex items-center gap-4">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-300 to-primary-600 font-display text-lg font-bold text-ink-950">
-                  {member.name[0]}
-                </span>
-                <div>
-                  <p className="font-semibold text-white">{member.name}</p>
-                  <p className="text-xs text-zinc-500">{member.enrollment}</p>
-                </div>
+      {/* One author, so the card is centred and capped rather than stranded in
+          a three-column grid. */}
+      <div className="mt-14 flex justify-center">
+        <Reveal className="w-full max-w-md">
+          <article className={`${CARD} ${CARD_HOVER} h-full p-6`}>
+            <div className="flex items-center gap-4">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-300 to-primary-600 font-display text-lg font-bold text-ink-950">
+                {AUTHOR.name[0]}
+              </span>
+              <div>
+                <p className="font-semibold text-white">{AUTHOR.name}</p>
+                <p className="text-xs text-zinc-500">{AUTHOR.subtitle}</p>
               </div>
-              <p className="mt-4 text-sm text-zinc-400">{member.role}</p>
-            </article>
-          </Reveal>
-        ))}
+            </div>
+            <p className="mt-4 text-sm text-zinc-400">{AUTHOR.role}</p>
+          </article>
+        </Reveal>
       </div>
 
       <Reveal delay={0.1}>

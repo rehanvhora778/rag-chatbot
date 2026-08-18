@@ -9,8 +9,7 @@ export const NAV_LINKS = [
   { id: 'home',        label: 'Home' },
   { id: 'features',    label: 'Features' },
   { id: 'how-it-works', label: 'How It Works' },
-  { id: 'pricing',     label: 'Pricing' },
-  { id: 'about',       label: 'About Us' },
+  { id: 'about',       label: 'About' },
   { id: 'docs',        label: 'Docs' },
 ]
 

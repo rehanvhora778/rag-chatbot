@@ -2,9 +2,7 @@ import HomeNav from '../components/home/HomeNav'
 import Hero from '../components/home/Hero'
 import FeatureStrip from '../components/home/FeatureStrip'
 import Features from '../components/home/Features'
-import TrustBand from '../components/home/TrustBand'
 import HowItWorks from '../components/home/HowItWorks'
-import Pricing from '../components/home/Pricing'
 import About from '../components/home/About'
 import Docs from '../components/home/Docs'
 import HomeFooter from '../components/home/HomeFooter'
@@ -17,9 +15,7 @@ export default function LandingPage() {
         <Hero />
         <FeatureStrip />
         <Features />
-        <TrustBand />
         <HowItWorks />
-        <Pricing />
         <About />
         <Docs />
       </main>
