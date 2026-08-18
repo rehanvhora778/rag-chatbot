@@ -13,7 +13,7 @@ server can start even before the heavy packages are loaded.
 import logging
 import time
 
-from bson import ObjectId
+from bson import Binary, ObjectId
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -106,6 +106,14 @@ def process_document(document_id: str, user_id: int, file_path: str, file_type: 
         # --- 4. Store: chunk text in MongoDB, vectors in FAISS ---
         # Each chunk keeps its page_number — that is what lets an answer cite
         # "(Page 12)" later on.
+        #
+        # The vector is stored here too, not only in the FAISS index. The index
+        # is a file, and on a host without a persistent disk it does not survive
+        # a restart; MongoDB does. Keeping the vector means a lost index is
+        # rebuilt by copying these back (see faiss_store.rebuild_index) instead
+        # of re-embedding every chunk — which on a throttled free instance takes
+        # minutes for a large document and would blow the request timeout.
+        # Cost is 384 float32s = 1.5 KB per chunk, so ~150 KB for a 50-page PDF.
         now = timezone.now()
         inserted = chunks_col().insert_many([
             {
@@ -118,9 +126,10 @@ def process_document(document_id: str, user_id: int, file_path: str, file_type: 
                 'start_char':  chunk['start_char'],
                 'end_char':    chunk['end_char'],
                 'word_count':  chunk['word_count'],
+                'embedding':   Binary(vector.tobytes()),
                 'created_at':  now,
             }
-            for chunk in chunks
+            for chunk, vector in zip(chunks, embeddings)
         ])
         chunk_ids = [str(oid) for oid in inserted.inserted_ids]
         save_index(user_id, document_id, embeddings, chunk_ids)
