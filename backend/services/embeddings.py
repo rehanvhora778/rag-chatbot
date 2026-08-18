@@ -130,6 +130,7 @@ class _OnnxBackend:
         return emb.astype(np.float32)
 
     def encode(self, texts: List[str], batch_size: int):
+        import time
         import numpy as np
 
         if not texts:
@@ -137,10 +138,23 @@ class _OnnxBackend:
         # Sort by length so each batch pads to its own (shorter) maximum, then
         # restore the caller's order at the end.
         order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
-        chunks = [
-            self._encode_batch([texts[j] for j in order[i:i + batch_size]])
-            for i in range(0, len(order), batch_size)
-        ]
+
+        starts = list(range(0, len(order), batch_size))
+        total = len(starts)
+        chunks = []
+        started = time.perf_counter()
+        for n, i in enumerate(starts, 1):
+            chunks.append(self._encode_batch([texts[j] for j in order[i:i + batch_size]]))
+            # A 50-page document is ~100 chunks and takes minutes on a throttled
+            # container. Without this the log goes silent between "embedding…"
+            # and "embedded", which is indistinguishable from a hang — that cost
+            # a long time to diagnose once already.
+            if total > 1:
+                logger.info(
+                    "  embedding batch %d/%d (%d texts, %.1fs elapsed)",
+                    n, total, len(order[i:i + batch_size]), time.perf_counter() - started,
+                )
+
         flat = np.vstack(chunks)
         out = np.empty_like(flat)
         out[order] = flat
@@ -281,6 +295,15 @@ def embed_texts(texts: List[str], batch_size: int = None):
 
     if batch_size is None:
         batch_size = getattr(settings, 'EMBEDDING_BATCH_SIZE', 64)
+
+    # A batch of 64 sequences padded to 256 tokens is a large activation tensor
+    # to hold at once in a 512 MB container, and on a fraction of a core it is
+    # also a long time to spend inside one call with nothing observable. Where
+    # the cgroup quota says we have a single core, embed in small batches
+    # instead: the same total work, but steady progress and a far lower peak.
+    if _usable_cores() <= 1:
+        batch_size = min(batch_size, 8)
+
     return get_embedding_model().encode(texts, batch_size=batch_size)
 
 

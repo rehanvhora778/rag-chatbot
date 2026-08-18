@@ -84,6 +84,11 @@ function ActionsMenu({ doc, onView, onChat, onRename, onDelete }) {
  *
  * Every fact shown (pages, size, chunks, status, error) comes from the document
  * record the API returns — nothing is inferred or padded out.
+ *
+ * The card deliberately does not clip its overflow: the actions dropdown is
+ * absolutely positioned below its trigger, and overflow-hidden cut the menu off
+ * part way down. The shimmer overlay carries its own rounded-2xl, so it still
+ * stays inside the corners without the card clipping.
  */
 export default function DocumentCard({ doc, onView, onChat, onRename, onDelete, variants }) {
   const meta = STATUS_META[doc.status] || STATUS_META.pending
@@ -97,7 +102,7 @@ export default function DocumentCard({ doc, onView, onChat, onRename, onDelete, 
       exit={{ opacity: 0, scale: 0.94 }}
       whileHover={{ y: -3 }}
       transition={{ type: 'spring', stiffness: 300, damping: 26 }}
-      className="group relative flex flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-ink-800/60 p-4 backdrop-blur-xl transition-colors hover:border-primary-500/30 sm:p-5"
+      className="group relative flex flex-col rounded-2xl border border-white/[0.07] bg-ink-800/60 p-4 backdrop-blur-xl transition-colors hover:border-primary-500/30 sm:p-5"
     >
       {busy && <div className="shimmer pointer-events-none absolute inset-0 rounded-2xl" />}
 

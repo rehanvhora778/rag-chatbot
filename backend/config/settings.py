@@ -327,7 +327,14 @@ EMBEDDING_PRELOAD       = config('EMBEDDING_PRELOAD',       default=True, cast=b
 # ═══════════════════════════════════════════════════════════════
 
 GROQ_API_KEY           = config('GROQ_API_KEY', default='')
-GROQ_MODEL             = config('GROQ_MODEL', default='llama-3.3-70b-versatile')
+# Groq retires models without notice. llama-3.3-70b-versatile was the default
+# here until it started returning 404 model_not_found, which silently broke both
+# chat answers and document summaries — summaries stored the literal string
+# "Summary could not be generated." and nobody saw the cause.
+# Verify against https://console.groq.com/docs/models before changing.
+# Note qwen/qwen3.6-27b is unsuitable as the chat model despite being available:
+# it emits its <think> reasoning into the reply body, which would land in answers.
+GROQ_MODEL             = config('GROQ_MODEL', default='openai/gpt-oss-120b')
 # Reads images: OCR for scanned PDF pages that have no selectable text.
 # Groq retired the llama-4 vision models this was originally built against; check
 # https://console.groq.com/docs/models before changing it, as most Groq models are

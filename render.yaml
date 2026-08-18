@@ -73,5 +73,13 @@ services:
       - key: EMBEDDING_PRELOAD
         value: "false"
 
+      # Pinned because Groq retires models without notice, and the failure is
+      # quiet: llama-3.3-70b-versatile started returning 404 model_not_found,
+      # which broke chat answers and left summaries reading "Summary could not
+      # be generated." Check https://console.groq.com/docs/models if answers
+      # start failing again.
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+
       - key: DEFAULT_FROM_EMAIL
         value: RAG Chatbot <no-reply@localhost>
