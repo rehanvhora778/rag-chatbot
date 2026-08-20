@@ -3,9 +3,11 @@
 from django.conf import settings
 import django.contrib.postgres.search
 import django.core.validators
+from django.contrib.postgres.operations import TrigramExtension, UnaccentExtension
 from django.db import migrations, models
 import django.db.models.deletion
 import pgvector.django.vector
+from pgvector.django import VectorExtension
 import uuid
 
 
@@ -18,6 +20,21 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # The extensions have to exist before a vector(384) column can be
+        # created, and docker/postgres/init.sql only runs once, against the
+        # database initdb creates. Anything else — the test database
+        # pytest-django builds, a CI service container, a managed instance
+        # created from a snapshot — never sees it, and the first migration
+        # fails with 'type "vector" does not exist'.
+        #
+        # Declaring them here makes the requirement part of the schema history
+        # instead of a container detail. Django's CreateExtension is already a
+        # no-op on any non-PostgreSQL connection, so the SQLite path is
+        # unaffected, and CREATE EXTENSION IF NOT EXISTS is idempotent where
+        # init.sql already ran.
+        VectorExtension(),
+        TrigramExtension(),
+        UnaccentExtension(),
         migrations.CreateModel(
             name='Document',
             fields=[
