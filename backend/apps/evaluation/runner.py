@@ -41,6 +41,7 @@ class CaseOutcome:
     case: EvaluationCase
     answer: str = ''
     chunks: list[dict[str, Any]] = field(default_factory=list)
+    trace: dict[str, Any] = field(default_factory=dict)
     scores: dict[str, Any] = field(default_factory=dict)
     retrieval_ms: int = 0
     generation_ms: int = 0
@@ -104,6 +105,9 @@ def settings_snapshot() -> dict[str, Any]:
         'min_similarity': settings.RAG_MIN_SIMILARITY_SCORE,
         'hybrid_enabled': settings.RAG_HYBRID_ENABLED,
         'rerank_enabled': settings.RAG_RERANK_ENABLED,
+        'rerank_model': settings.RAG_RERANK_MODEL,
+        'keyword_top_k': settings.RAG_KEYWORD_TOP_K,
+        'rrf_k': settings.RAG_RRF_K,
         'query_rewrite': settings.RAG_QUERY_REWRITE,
     }
 
@@ -115,14 +119,15 @@ def settings_snapshot() -> dict[str, Any]:
 def evaluate_case(case: EvaluationCase, user_id: int, document_ids: list[str],
                   judge: bool = False) -> CaseOutcome:
     from services.llm import REFUSAL_MESSAGE, generate_rag_response
-    from services.rag_pipeline import retrieve_relevant_chunks
 
     outcome = CaseOutcome(case=case)
 
     # --- Retrieve ---
     started = time.perf_counter()
     try:
-        outcome.chunks = retrieve_relevant_chunks(user_id, document_ids, case.question)
+        outcome.chunks, outcome.trace = _retrieve_with_trace(
+            user_id, document_ids, case.question,
+        )
     except Exception as exc:
         logger.error('Retrieval failed for case %s: %s', case.pk, exc, exc_info=True)
         outcome.error = f'retrieval failed: {exc}'
@@ -138,8 +143,21 @@ def evaluate_case(case: EvaluationCase, user_id: int, document_ids: list[str],
             # to be stored in.
             outcome.answer = generate_rag_response(case.question, outcome.chunks, [])
         except Exception as exc:
-            logger.error('Generation failed for case %s: %s', case.pk, exc, exc_info=True)
+            # The generation failed, but retrieval did not, and what came back
+            # is still measurable. Discarding it would mean a provider rate
+            # limit — the normal failure of a free tier, and one that hits
+            # several cases of a long run — silently erases the retrieval
+            # numbers for those cases, leaving an average computed over
+            # whichever handful got through. That is a far more misleading
+            # result than a run that reports both the scores and the failures.
+            logger.error('Generation failed for case %s: %s', case.pk, exc)
             outcome.error = f'generation failed: {exc}'
+            outcome.generation_ms = round((time.perf_counter() - started) * 1000)
+            outcome.scores = _score(case, outcome, judge=False)
+            outcome.scores['generation_failed'] = True
+            # Never passes: an unanswered question is not a success, whatever
+            # retrieval managed.
+            outcome.passed = False
             return outcome
     else:
         outcome.answer = REFUSAL_MESSAGE
@@ -149,6 +167,30 @@ def evaluate_case(case: EvaluationCase, user_id: int, document_ids: list[str],
     outcome.scores = _score(case, outcome, judge=judge)
     outcome.passed = _passed(case, outcome)
     return outcome
+
+
+def _retrieve_with_trace(user_id: int, document_ids: list[str],
+                         question: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Retrieve, and report which retrieval components actually ran.
+
+    Settings say what was asked for; this says what happened. A run labelled
+    "with reranking" whose reranker could not load would otherwise score
+    identically to the baseline and be read as evidence that reranking does not
+    help.
+    """
+    from rag.retrievers.hybrid import build_retriever
+    from rag.types import documents_to_chunks
+    from services.rag_pipeline import resolve_index_keys
+
+    keys = resolve_index_keys(user_id, document_ids)
+    if not keys:
+        return [], {}
+
+    retriever = build_retriever(user_id, keys)
+    documents = retriever.invoke(question)
+    trace = dict(getattr(retriever, 'trace', {}) or {})
+    trace['retriever'] = type(retriever).__name__
+    return documents_to_chunks(documents), trace
 
 
 def _score(case: EvaluationCase, outcome: CaseOutcome, judge: bool) -> dict[str, Any]:
@@ -307,7 +349,7 @@ def _store(run: EvaluationRun, outcome: CaseOutcome) -> None:
             }
             for c in outcome.chunks
         ],
-        scores=outcome.scores,
+        scores={**outcome.scores, 'trace': outcome.trace},
         retrieval_ms=outcome.retrieval_ms,
         generation_ms=outcome.generation_ms,
         total_ms=outcome.retrieval_ms + outcome.generation_ms,
@@ -321,10 +363,18 @@ def aggregate(outcomes: list[CaseOutcome],
     """Roll per-case scores into the run's headline numbers."""
     answerable = [o for o in outcomes if not o.case.must_refuse]
     controls = [o for o in outcomes if o.case.must_refuse]
-    latencies = [float(o.retrieval_ms + o.generation_ms) for o in outcomes if not o.error]
 
     def collect(key: str, source: list[CaseOutcome]) -> Optional[float]:
         return metrics.mean(o.scores.get(key) for o in source)
+
+    # Retrieval metrics are averaged over every case that retrieved something,
+    # including ones whose generation failed. Answer metrics are averaged only
+    # over cases that produced an answer: an answer that never arrived is not a
+    # bad answer, and scoring it as one would blame the pipeline for the
+    # provider being busy.
+    answered = [o for o in outcomes if not o.error]
+    answered_answerable = [o for o in answered if not o.case.must_refuse]
+    latencies = [float(o.retrieval_ms + o.generation_ms) for o in answered]
 
     summary: dict[str, Any] = {
         'cases_total': len(outcomes),
@@ -338,21 +388,34 @@ def aggregate(outcomes: list[CaseOutcome],
         'retrieval_precision': collect('retrieval_precision', answerable),
         'mrr': collect('reciprocal_rank', answerable),
         'context_relevance': collect('context_relevance', answerable),
-        'faithfulness_lexical': collect('faithfulness_lexical', outcomes),
-        'citation_validity': collect('citation_validity', answerable),
-        'answer_correctness_lexical': collect('answer_correctness_lexical', answerable),
+        'faithfulness_lexical': collect('faithfulness_lexical', answered),
+        'citation_validity': collect('citation_validity', answered_answerable),
+        'answer_correctness_lexical': collect('answer_correctness_lexical', answered_answerable),
 
         # Reported separately: refusing a control is a different skill from
         # answering an answerable question, and one average hides which of the
         # two a pipeline is bad at.
-        'refusal_accuracy_control': collect('refusal_correct', controls),
-        'answer_rate_answerable': collect('refusal_correct', answerable),
+        'refusal_accuracy_control': collect('refusal_correct',
+                                            [o for o in answered if o.case.must_refuse]),
+        'answer_rate_answerable': collect('refusal_correct', answered_answerable),
 
+        # All three latency figures are computed over the SAME cases — the ones
+        # that completed. Mixing populations here produced a report where the
+        # generation component was larger than the total it was a component of,
+        # because the total counted only successes while the parts counted
+        # every attempt, including the ones that spent their time being retried
+        # and then failing.
         'latency_ms_mean': metrics.mean(latencies),
         'latency_ms_p50': metrics.percentile(latencies, 0.50),
         'latency_ms_p95': metrics.percentile(latencies, 0.95),
-        'retrieval_ms_mean': metrics.mean([float(o.retrieval_ms) for o in outcomes]),
-        'generation_ms_mean': metrics.mean([float(o.generation_ms) for o in outcomes]),
+        'retrieval_ms_mean': metrics.mean(
+            [float(o.retrieval_ms) for o in answered]),
+        'generation_ms_mean': metrics.mean(
+            [float(o.generation_ms) for o in answered]),
+        # Retrieval ran for every case, so this one is over all of them and is
+        # the number to read when a run was heavily rate limited.
+        'retrieval_ms_mean_all': metrics.mean(
+            [float(o.retrieval_ms) for o in outcomes]),
 
         # Recorded so the report can say when recall is not worth reading.
         # A corpus with fewer chunks than the retriever returns makes recall

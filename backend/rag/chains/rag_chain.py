@@ -41,6 +41,11 @@ class RAGResult:
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
     truncated: bool = False
+    # What retrieval actually did, as opposed to what settings asked for.
+    # Recorded because a component that silently did not run is the failure
+    # mode an evaluation cannot detect on its own.
+    trace: dict[str, Any] = field(default_factory=dict)
+    rewritten_query: str = ''
 
     @property
     def total_ms(self) -> int:
@@ -121,18 +126,24 @@ def run(user_id: int, question: str, document_keys: list[str],
         history: Optional[list[dict]] = None,
         filters: Optional[dict[str, Any]] = None) -> RAGResult:
     """Answer one question against a set of documents."""
+    from rag.query.rewrite import preprocess, rewrite_query
     from rag.registry import get_llm
-    from rag.retrievers.vector import VectorRetriever
+    from rag.retrievers.hybrid import build_retriever
+
+    started = time.perf_counter()
+
+    # --- Preprocess and (optionally) rewrite ---
+    # A follow-up like "what about international purchases?" retrieves nothing
+    # useful on its own; the reference is resolved against the history before
+    # the retriever ever sees it. Off by default — see rag/query/rewrite.py.
+    search_query, rewritten = rewrite_query(preprocess(question), history or [])
 
     # --- Retrieve ---
-    started = time.perf_counter()
-    retriever = VectorRetriever(
-        user_id=user_id,
-        document_keys=document_keys,
-        filters=filters or {},
-    )
-    documents = retriever.invoke(question)
+    retriever = build_retriever(user_id, document_keys, filters)
+    documents = retriever.invoke(search_query)
     retrieval_ms = round((time.perf_counter() - started) * 1000)
+    trace = dict(getattr(retriever, 'trace', {}) or {})
+    trace['retriever'] = type(retriever).__name__
 
     if not documents:
         # Nothing relevant. Refuse rather than letting the model answer from
@@ -144,9 +155,15 @@ def run(user_id: int, question: str, document_keys: list[str],
             refused=True,
             retrieval_ms=retrieval_ms,
             provider=settings.LLM_PROVIDER,
+            trace=trace,
+            rewritten_query=search_query if rewritten else '',
         )
 
     # --- Generate ---
+    # The ORIGINAL question goes to the model, not the rewrite. The rewrite
+    # exists to steer retrieval; showing it to the model would have the
+    # assistant answering a question the user did not ask, and any imprecision
+    # the rewrite introduced would become the answer's subject.
     llm = get_llm()
     messages = build_messages(question, documents, history)
 
@@ -170,6 +187,8 @@ def run(user_id: int, question: str, document_keys: list[str],
         completion_tokens=response.usage.completion_tokens,
         total_tokens=response.usage.total_tokens,
         truncated=response.truncated,
+        trace=trace,
+        rewritten_query=search_query if rewritten else '',
     )
 
 
@@ -185,14 +204,14 @@ def stream(user_id: int, question: str, document_keys: list[str],
 
     Used by the streaming chat endpoint in Phase 8.
     """
+    from rag.query.rewrite import preprocess, rewrite_query
     from rag.registry import get_llm
-    from rag.retrievers.vector import VectorRetriever
+    from rag.retrievers.hybrid import build_retriever
 
     started = time.perf_counter()
-    retriever = VectorRetriever(
-        user_id=user_id, document_keys=document_keys, filters=filters or {},
-    )
-    documents = retriever.invoke(question)
+    search_query, _rewritten = rewrite_query(preprocess(question), history or [])
+    retriever = build_retriever(user_id, document_keys, filters)
+    documents = retriever.invoke(search_query)
     retrieval_ms = round((time.perf_counter() - started) * 1000)
 
     citations = build_citations(documents)

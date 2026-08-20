@@ -30,12 +30,14 @@ METRIC_ORDER = [
     ('answer_rate_answerable', 'Answer rate', 'answerable questions actually answered'),
 ]
 
+# Latency, of completed cases only, so the parts always sum to the whole.
 LATENCY_ORDER = [
     ('latency_ms_mean', 'Latency mean'),
     ('latency_ms_p50', 'Latency p50'),
     ('latency_ms_p95', 'Latency p95'),
     ('retrieval_ms_mean', '  of which retrieval'),
     ('generation_ms_mean', '  of which generation'),
+    ('retrieval_ms_mean_all', 'Retrieval mean (all cases)'),
 ]
 
 
@@ -173,6 +175,7 @@ class Command(BaseCommand):
             f'{m.get("cases_control", 0)} control (must refuse)\n'
         )
 
+        self._generation_caveat(m)
         self._corpus_caveat(m)
 
         self.stdout.write('  QUALITY')
@@ -201,6 +204,25 @@ class Command(BaseCommand):
             f'  Failing cases: /django-admin/evaluation/evaluationresult/'
             f'?run__id__exact={run.pk}&passed__exact=0\n'
         )
+
+    def _generation_caveat(self, m: dict):
+        """Say when the provider, not the pipeline, is why cases failed."""
+        errored = m.get('cases_errored') or 0
+        if not errored:
+            return
+
+        total = m.get('cases_total', 0)
+        lines = [
+            f'  NOTE: {errored} of {total} case(s) failed to generate an answer, '
+            'usually a provider',
+            '        rate limit. Their RETRIEVAL scores are still included — that '
+            'half ran fine.',
+            '        The answer-side scores below are averaged only over cases '
+            'that answered,',
+            '        so they come from a smaller sample than the retrieval ones.',
+            '',
+        ]
+        self.stdout.write(self.style.WARNING('\n'.join(lines)))
 
     def _corpus_caveat(self, m: dict):
         """Say when recall is not worth reading.
