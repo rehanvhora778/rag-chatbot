@@ -1,236 +1,110 @@
-import logging
-import threading
-from pathlib import Path
+"""Document endpoints.
 
-from bson import ObjectId
-from bson.errors import InvalidId
-from django.utils import timezone
+HTTP only: parse the request, call a service, shape the response. Every rule
+about what may be uploaded, what counts as a duplicate and what deleting a
+document has to clean up lives in services/document_service.py, where it can be
+tested without a request.
+"""
+import logging
+
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
-from core.analytics import record_event
-from core.constants import EVENT_UPLOAD, STATUS_PENDING
-from core.mongo import chunks_col, documents_col
 from core.responses import APIResponse
-from core.utils import (
-    compute_file_hash,
-    format_file_size,
-    generate_unique_filename,
-    get_file_extension,
-    get_user_upload_dir,
-    serialize_mongo_doc,
-)
-from services.document_processor import process_document
+from core.utils import format_file_size
+from repositories.factory import get_document_repository
+from services import document_service
+from services.document_service import DocumentError
 
 from .serializers import RenameDocumentSerializer
 
 logger = logging.getLogger(__name__)
 
 
-def _serialize_doc(doc: dict) -> dict:
-    d = serialize_mongo_doc(doc)
-    d['id'] = d.pop('_id', '')
-    d['file_size_display'] = format_file_size(d.get('file_size', 0))
-    return d
+def _present(document: dict) -> dict:
+    """Add the display-only fields the API has always included."""
+    return {**document, 'file_size_display': format_file_size(document.get('file_size', 0))}
 
 
 class DocumentListUploadView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
+    # Uploads are the most expensive unauthenticated-cost endpoint: each one
+    # writes to disk and starts embedding work.
+    throttle_scope = 'upload'
 
     def get(self, request):
-        """List all documents for the authenticated user."""
-        page = int(request.query_params.get('page', 1))
-        page_size = int(request.query_params.get('page_size', 20))
+        """List the authenticated user's documents, newest first."""
+        page = max(int(request.query_params.get('page', 1)), 1)
+        page_size = min(int(request.query_params.get('page_size', 20)), 100)
 
-        total = documents_col().count_documents({'user_id': request.user.id})
-        docs = list(
-            documents_col()
-            .find({'user_id': request.user.id})
-            .sort('created_at', -1)
-            .skip((page - 1) * page_size)
-            .limit(page_size)
+        result = get_document_repository().list_for_user(
+            request.user.id, page=page, page_size=page_size,
         )
-
         return APIResponse.paginated(
-            data=[_serialize_doc(d) for d in docs],
-            total=total,
+            data=[_present(d) for d in result['items']],
+            total=result['total'],
             page=page,
             page_size=page_size,
             message='Documents retrieved.',
         )
 
     def post(self, request):
-        """Upload one or more documents and kick off processing in background threads."""
-        files = request.FILES.getlist('files')
-        if not files:
-            return APIResponse.error('No files provided.')
-
-        from django.conf import settings
-        allowed_exts = settings.ALLOWED_DOCUMENT_EXTENSIONS
-        limit_mb = settings.MAX_DOCUMENT_SIZE_MB
-
-        created_docs = []
-        errors = []
-
-        for f in files:
-            ext = get_file_extension(f.name)
-            if ext not in allowed_exts:
-                errors.append(f"{f.name}: unsupported type. Allowed: {', '.join(allowed_exts)}.")
-                continue
-            if f.size > limit_mb * 1024 * 1024:
-                errors.append(f"{f.name}: exceeds the {limit_mb} MB limit for .{ext} files.")
-                continue
-
-            file_hash = compute_file_hash(f)
-
-            # Check for duplicate
-            existing = documents_col().find_one({'user_id': request.user.id, 'file_hash': file_hash})
-            if existing:
-                errors.append(f"{f.name}: already uploaded.")
-                continue
-
-            unique_name = generate_unique_filename(f.name)
-            upload_dir = get_user_upload_dir(request.user.id)
-            save_path = upload_dir / unique_name
-
-            # Save file to disk
-            with open(save_path, 'wb') as dest:
-                for chunk in f.chunks():
-                    dest.write(chunk)
-
-            now = timezone.now()
-            doc = {
-                'user_id':           request.user.id,
-                'filename':          unique_name,
-                'original_filename': f.name,
-                'file_type':         ext,
-                'file_size':         f.size,
-                'file_hash':         file_hash,
-                'file_path':         str(save_path),
-                'status':            STATUS_PENDING,
-                'page_count':        0,
-                'word_count':        0,
-                'chunk_count':       0,
-                'summary':           '',
-                'error_message':     '',
-                'created_at':        now,
-                'updated_at':        now,
-            }
-
-            result = documents_col().insert_one(doc)
-            document_id = str(result.inserted_id)
-            doc['_id'] = document_id
-
-            record_event(request.user.id, EVENT_UPLOAD, {
-                'document_id': document_id, 'filename': f.name, 'file_type': ext,
-            })
-
-            # Process in background thread
-            thread = threading.Thread(
-                target=process_document,
-                args=(document_id, request.user.id, str(save_path), ext),
-                daemon=True,
+        """Upload one or more documents and queue them for processing."""
+        try:
+            outcome = document_service.upload_documents(
+                request.user.id, request.FILES.getlist('files'),
             )
-            thread.start()
+        except DocumentError as exc:
+            return APIResponse.error(str(exc))
 
-            created_docs.append(_serialize_doc(doc))
+        if not outcome.any_created:
+            return APIResponse.error('No documents were uploaded.', outcome.errors)
 
-        response_data = {'uploaded': created_docs}
-        if errors:
-            response_data['errors'] = errors
+        data = {'uploaded': [_present(d) for d in outcome.created]}
+        if outcome.errors:
+            # Partial success: the accepted files are reported alongside the
+            # reason each rejected one was refused, so the user can tell which
+            # of five files was the problem.
+            data['errors'] = outcome.errors
 
-        if not created_docs:
-            return APIResponse.error('No documents were uploaded.', errors)
-
-        return APIResponse.created(data=response_data, message=f'{len(created_docs)} document(s) queued for processing.')
+        return APIResponse.created(
+            data=data,
+            message=f'{len(outcome.created)} document(s) queued for processing.',
+        )
 
 
 class DocumentDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def _get_document(self, document_id: str, user_id: int):
-        try:
-            doc = documents_col().find_one({'_id': ObjectId(document_id), 'user_id': user_id})
-        except InvalidId:
-            return None
-        return doc
-
     def get(self, request, document_id):
-        doc = self._get_document(document_id, request.user.id)
-        if not doc:
+        document = get_document_repository().get(document_id, request.user.id)
+        if document is None:
             return APIResponse.not_found('Document not found.')
-        return APIResponse.success(data=_serialize_doc(doc))
+        return APIResponse.success(data=_present(document))
 
     def patch(self, request, document_id):
-        """Rename a document. Only the display name changes — the file on disk,
-        its hash, chunks and FAISS index are all untouched."""
-        doc = self._get_document(document_id, request.user.id)
-        if not doc:
-            return APIResponse.not_found('Document not found.')
-
+        """Rename a document. The file, its hash, chunks and index are untouched."""
         serializer = RenameDocumentSerializer(data=request.data)
         if not serializer.is_valid():
             return APIResponse.error('Validation failed.', serializer.errors)
 
-        new_name = serializer.validated_data['original_filename']
-        documents_col().update_one(
-            {'_id': ObjectId(document_id)},
-            {'$set': {'original_filename': new_name, 'updated_at': timezone.now()}},
-        )
-        # Chunks carry a denormalised copy of the filename; keep it in step so
-        # citations don't keep quoting the old name.
-        chunks_col().update_many(
-            {'document_id': document_id, 'user_id': request.user.id},
-            {'$set': {'filename': new_name}},
-        )
-        # Chat sessions cache the names of the documents they're grounded in.
-        old_name = doc.get('original_filename', '')
-        if old_name and old_name != new_name:
-            from core.mongo import chat_sessions_col
-            for s in chat_sessions_col().find(
-                {'user_id': request.user.id, 'document_ids': document_id},
-                {'document_ids': 1, 'document_names': 1},
-            ):
-                names = list(s.get('document_names') or [])
-                ids   = list(s.get('document_ids') or [])
-                if document_id in ids and len(names) == len(ids):
-                    names[ids.index(document_id)] = new_name
-                    chat_sessions_col().update_one(
-                        {'_id': s['_id']}, {'$set': {'document_names': names}},
-                    )
+        try:
+            document = document_service.rename_document(
+                request.user.id, document_id,
+                serializer.validated_data['original_filename'],
+            )
+        except DocumentError as exc:
+            return APIResponse.not_found(str(exc))
 
-        updated = documents_col().find_one({'_id': ObjectId(document_id)})
-        return APIResponse.success(data=_serialize_doc(updated), message='Document renamed.')
+        return APIResponse.success(data=_present(document), message='Document renamed.')
 
     def delete(self, request, document_id):
-        doc = self._get_document(document_id, request.user.id)
-        if not doc:
-            return APIResponse.not_found('Document not found.')
-
-        # Delete FAISS index
         try:
-            from services.faiss_store import delete_index
-            delete_index(request.user.id, document_id)
-        except Exception as exc:
-            logger.warning("FAISS deletion warning: %s", exc)
-
-        # Delete file from disk
-        file_path = doc.get('file_path', '')
-        if file_path and Path(file_path).exists():
-            try:
-                Path(file_path).unlink()
-            except Exception as exc:
-                logger.warning("File deletion warning: %s", exc)
-
-        # Delete chunks
-        chunks_col().delete_many({'document_id': document_id})
-
-        # Delete document
-        documents_col().delete_one({'_id': ObjectId(document_id)})
-
-        logger.info("Document %s deleted by user %s", document_id, request.user.id)
+            document_service.delete_document(request.user.id, document_id)
+        except DocumentError as exc:
+            return APIResponse.not_found(str(exc))
         return APIResponse.success(message='Document deleted successfully.')
 
 
@@ -238,51 +112,21 @@ class DocumentSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, document_id):
-        try:
-            doc = documents_col().find_one(
-                {'_id': ObjectId(document_id), 'user_id': request.user.id},
-                {'summary': 1, 'status': 1, 'original_filename': 1}
-            )
-        except InvalidId:
-            return APIResponse.not_found('Document not found.')
-
-        if not doc:
+        document = get_document_repository().get(document_id, request.user.id)
+        if document is None:
             return APIResponse.not_found('Document not found.')
 
         return APIResponse.success(data={
-            'document_id':   document_id,
-            'filename':      doc.get('original_filename', ''),
-            'status':        doc.get('status', ''),
-            'summary':       doc.get('summary', ''),
+            'document_id': document_id,
+            'filename': document.get('original_filename', ''),
+            'status': document.get('status', ''),
+            'summary': document.get('summary', ''),
         })
 
     def post(self, request, document_id):
-        """Regenerate summary for a completed document."""
+        """Regenerate the summary of a document that finished processing."""
         try:
-            doc = documents_col().find_one(
-                {'_id': ObjectId(document_id), 'user_id': request.user.id}
-            )
-        except InvalidId:
-            return APIResponse.not_found('Document not found.')
-
-        if not doc:
-            return APIResponse.not_found('Document not found.')
-
-        if doc.get('status') != 'completed':
-            return APIResponse.error('Document has not finished processing yet.')
-
-        def _regen():
-            from services.llm import generate_document_summary
-            from services.text_extractor import extract_text
-            try:
-                pages = extract_text(doc['file_path'], doc['file_type'])
-                summary = generate_document_summary(pages)
-                documents_col().update_one(
-                    {'_id': ObjectId(document_id)},
-                    {'$set': {'summary': summary, 'updated_at': timezone.now()}},
-                )
-            except Exception as exc:
-                logger.error("Summary regen failed: %s", exc)
-
-        threading.Thread(target=_regen, daemon=True).start()
+            document_service.regenerate_summary(request.user.id, document_id)
+        except DocumentError as exc:
+            return APIResponse.error(str(exc))
         return APIResponse.success(message='Summary regeneration started.')

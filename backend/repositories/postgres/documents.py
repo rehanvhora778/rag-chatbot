@@ -60,6 +60,12 @@ def _to_dto(doc: Optional[Document]) -> Optional[DocumentDTO]:
         'vector_count': doc.vector_count,
         'summary': doc.summary,
         'error_message': doc.error_message,
+        # Exposed because the FAISS backend names index files after the id the
+        # document had in MongoDB. Retrieval asks for it via
+        # rag_pipeline._index_key; without it a migrated document would be
+        # looked up under its new UUID, find no index file, and silently
+        # retrieve nothing. Unused once VECTOR_BACKEND=pgvector.
+        'legacy_mongo_id': doc.legacy_mongo_id,
         'created_at': doc.created_at,
         'updated_at': doc.updated_at,
     }
@@ -184,7 +190,11 @@ class PostgresDocumentRepository:
 
     def get_chunks(self, chunk_ids: list[str], user_id: int) -> list[ChunkDTO]:
         pks = [p for p in (_uuid(c) for c in chunk_ids) if p is not None]
-        if not pks:
+        # Ids that are not UUIDs are MongoDB ObjectIds coming back out of a
+        # FAISS index built before the migration — see _legacy_chunks below.
+        legacy_ids = [c for c in chunk_ids if _uuid(c) is None]
+
+        if not pks and not legacy_ids:
             return []
 
         found = {
@@ -193,6 +203,7 @@ class PostgresDocumentRepository:
             .filter(pk__in=pks, owner_id=user_id)
             .select_related('document')
         }
+        found.update(self._legacy_chunks(legacy_ids, user_id))
         # Caller order is the ranking; a database IN clause has no order.
         results: list[ChunkDTO] = []
         for chunk_id in chunk_ids:
@@ -208,6 +219,35 @@ class PostgresDocumentRepository:
                 'chunk_index': chunk.chunk_index,
             })
         return results
+
+    def _legacy_chunks(self, legacy_ids: list[str], user_id: int) -> dict[str, DocumentChunk]:
+        """Resolve chunks by the MongoDB id they were migrated from.
+
+        A FAISS index stores, alongside its vectors, the chunk id each vector
+        belongs to. Indexes built before the migration hold MongoDB ObjectIds,
+        so with ``PERSISTENCE_BACKEND=postgres`` and ``VECTOR_BACKEND=faiss``
+        the search returns ids this repository cannot look up — and the failure
+        is silent: no error, no results, and every question answered with the
+        refusal message as though the documents contained nothing.
+
+        ``migrate_from_mongo`` records the original id in ``metadata``, so the
+        lookup is possible. This exists to keep retrieval working through the
+        migration, which is what allows the two backends to be compared on
+        identical queries before MongoDB is retired.
+
+        Removable once every index is either rebuilt or replaced by pgvector.
+        """
+        if not legacy_ids:
+            return {}
+
+        matched = (
+            DocumentChunk.objects
+            .filter(owner_id=user_id, metadata__legacy_mongo_id__in=legacy_ids)
+            .select_related('document')
+        )
+        # Keyed by the legacy id, because that is what the caller asked for and
+        # what it will use to attach the similarity score.
+        return {c.metadata['legacy_mongo_id']: c for c in matched}
 
     def delete_chunks(self, document_id: str, user_id: int) -> int:
         pk = _uuid(document_id)

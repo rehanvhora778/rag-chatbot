@@ -42,6 +42,8 @@ class DocumentDTO(TypedDict, total=False):
     vector_count: int
     summary: str
     error_message: str
+    # Only set on rows migrated out of MongoDB; names the FAISS index file.
+    legacy_mongo_id: Optional[str]
     created_at: Any
     updated_at: Any
 
