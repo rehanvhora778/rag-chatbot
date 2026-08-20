@@ -40,6 +40,14 @@ python-docx==1.1.2
 chardet==5.2.0
 filetype==1.2.0
 
+# RAG framework interfaces. langchain-core ONLY — the Document, Embeddings,
+# BaseRetriever and prompt-template interfaces, which make this project's
+# components compose with off-the-shelf ones. The langchain and
+# langchain-community packages are deliberately not installed: their
+# implementations would replace working code, and RecursiveCharacterTextSplitter
+# in particular loses the page numbers every citation in this product depends on.
+langchain-core==0.3.15
+
 # ML / Embeddings / Vector Search
 sentence-transformers==3.1.1
 faiss-cpu==1.8.0
