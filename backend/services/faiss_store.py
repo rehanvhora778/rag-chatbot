@@ -100,9 +100,9 @@ def rebuild_index(user_id, document_id: str) -> bool:
     processing never finished.
     """
     import numpy as np
+    from django.conf import settings
 
     from core.mongo import chunks_col
-    from django.conf import settings
 
     with _rebuild_lock(user_id, document_id):
         # Another thread may have finished the rebuild while we waited here.
@@ -186,7 +186,7 @@ def _fetch_candidates(user_id, document_id: str, query_embedding, fetch_k: int):
 
     distances, indices = index.search(query_embedding, k)
     candidates = []
-    for dist, idx in zip(distances[0], indices[0]):
+    for dist, idx in zip(distances[0], indices[0], strict=False):
         if idx < 0:
             continue
         try:
@@ -219,7 +219,7 @@ def _mmr_select(candidates, k: int, lambda_mult: float):
 
     while remaining and len(selected) < k:
         best_i, best_mmr = 0, -float("inf")
-        for i, (cid, score, vec) in enumerate(remaining):
+        for i, (_cid, score, vec) in enumerate(remaining):
             if selected_vecs:
                 diversity = max(float(np.dot(vec, sv)) for sv in selected_vecs)
             else:

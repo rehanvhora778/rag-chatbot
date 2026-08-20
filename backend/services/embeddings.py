@@ -9,6 +9,7 @@ All ML imports are lazy to avoid Django startup failures when packages
 aren't installed. Call preload_embedding_model_async() at server start so
 the first upload/chat never pays the model-load cost.
 """
+import contextlib
 import logging
 import threading
 from typing import List
@@ -35,24 +36,23 @@ def _usable_cores() -> int:
     import os
 
     # cgroup v2 — "<quota> <period>", or "max <period>" when unlimited.
-    try:
+    # Not every platform has cgroups, and the files are absent rather than
+    # empty when it doesn't — suppress rather than log, because "this is not
+    # Linux" is the expected case, not a fault.
+    with contextlib.suppress(Exception):
         with open('/sys/fs/cgroup/cpu.max') as fh:
             quota, period = fh.read().split()
         if quota != 'max':
             return max(1, round(int(quota) / int(period)))
-    except Exception:
-        pass
 
     # cgroup v1
-    try:
+    with contextlib.suppress(Exception):
         with open('/sys/fs/cgroup/cpu/cpu.cfs_quota_us') as fh:
             quota = int(fh.read())
         with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us') as fh:
             period = int(fh.read())
         if quota > 0:
             return max(1, round(quota / period))
-    except Exception:
-        pass
 
     return os.cpu_count() or 1
 
@@ -61,10 +61,9 @@ class _OnnxBackend:
     """MiniLM-style bi-encoder on ONNX Runtime (mean pooling + L2 norm)."""
 
     def __init__(self, model_name: str, provider_pref: str = 'auto'):
-        import os
         import onnxruntime as ort
-        from transformers import AutoTokenizer
         from huggingface_hub import hf_hub_download
+        from transformers import AutoTokenizer
 
         repo_id = model_name if '/' in model_name else f'sentence-transformers/{model_name}'
         try:
@@ -131,6 +130,7 @@ class _OnnxBackend:
 
     def encode(self, texts: List[str], batch_size: int):
         import time
+
         import numpy as np
 
         if not texts:
@@ -166,13 +166,14 @@ class _TorchBackend:
 
     def __init__(self, model_name: str):
         import os
+
         from sentence_transformers import SentenceTransformer
 
-        try:
+        # Best-effort thread tuning; torch works fine at its default if this
+        # version doesn't expose the setter.
+        with contextlib.suppress(Exception):
             import torch
             torch.set_num_threads(os.cpu_count() or 1)
-        except Exception:
-            pass
         self.model = SentenceTransformer(model_name)
         self.device = 'CPU (torch)'
 
@@ -270,8 +271,8 @@ def ensure_http_stack_loaded():
 
     Importing it once here, on the main thread, makes the race impossible.
     """
-    import urllib3   # noqa: F401
     import requests  # noqa: F401
+    import urllib3  # noqa: F401
 
 
 def preload_embedding_model_async():

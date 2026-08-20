@@ -1,13 +1,21 @@
+"""Settings shared by every environment.
+
+Nothing here decides DEBUG or applies security hardening — development.py,
+production.py and test.py do that. Anything that differs between environments
+belongs in one of those, not here.
+"""
 import os
-from pathlib import Path
 from datetime import timedelta
-from decouple import config, Csv
+from pathlib import Path
+
+from decouple import Csv, config
 
 # ═══════════════════════════════════════════════════════════════
 # BASE
 # ═══════════════════════════════════════════════════════════════
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# config/settings/base.py -> config/settings -> config -> backend/
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-replace-me-in-production')
 DEBUG = config('DEBUG', default=True, cast=bool)
@@ -86,21 +94,52 @@ TEMPLATES = [
 ]
 
 # ═══════════════════════════════════════════════════════════════
-# DATABASE — SQLite for Django internals only
-# MongoDB stores all project data (documents, chats, analytics)
+# DATABASE
 # ═══════════════════════════════════════════════════════════════
+#
+# Two supported shapes, chosen by whether DATABASE_URL is set:
+#
+#   unset  -> SQLite. Historically this held ONLY Django's auth and JWT tables;
+#             every piece of project data lived in MongoDB. This stays the
+#             default so an existing checkout keeps working untouched.
+#
+#   set    -> PostgreSQL (+ pgvector). The target architecture: domain models,
+#             foreign keys, full-text search and vector search in one place.
+#
+# During the migration both are populated; PERSISTENCE_BACKEND below decides
+# which one the application actually reads from.
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+DATABASE_URL = config('DATABASE_URL', default='')
+
+if DATABASE_URL:
+    import dj_database_url
+
+    DATABASES = {
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=config('DB_CONN_MAX_AGE', default=600, cast=int),
+            conn_health_checks=True,
+        )
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Which store the domain layer reads and writes.
+#   'mongo'    — the original implementation (default, so nothing changes yet)
+#   'postgres' — the Django ORM models
+# Kept as an explicit switch so `main` stays deployable against the existing
+# Mongo Atlas deployment while the Postgres path is built and verified beside it.
+PERSISTENCE_BACKEND = config('PERSISTENCE_BACKEND', default='mongo')
+
 # ═══════════════════════════════════════════════════════════════
-# MONGODB
+# MONGODB (legacy store — see PERSISTENCE_BACKEND)
 # ═══════════════════════════════════════════════════════════════
 
 MONGODB_HOST = config('MONGODB_HOST', default='mongodb://localhost:27017')
@@ -115,6 +154,64 @@ MONGO_COLLECTIONS = {
     'DOCUMENT_SUMMARIES': 'document_summaries',
     'OTPS':               'otps',
 }
+
+# ═══════════════════════════════════════════════════════════════
+# REDIS — Celery broker/result backend and the Django cache
+# ═══════════════════════════════════════════════════════════════
+
+REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+
+if config('CACHE_ENABLED', default=False, cast=bool):
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': config('CACHE_URL', default=REDIS_URL),
+            'KEY_PREFIX': 'ragchat',
+            'TIMEOUT': 300,
+        }
+    }
+else:
+    # No Redis needed to run the project locally the way it always has been.
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'ragchat-locmem',
+        }
+    }
+
+# ═══════════════════════════════════════════════════════════════
+# CELERY — background document ingestion
+# ═══════════════════════════════════════════════════════════════
+
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default=REDIS_URL)
+CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default=REDIS_URL)
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TIMEZONE = 'UTC'
+CELERY_ENABLE_UTC = True
+
+# A worker that dies mid-document must not lose the job. late-ack plus
+# reject-on-lost redelivers it; the ingestion task is written to be idempotent
+# so a redelivery re-processes cleanly rather than duplicating chunks.
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+
+# Embedding is CPU-bound and memory-hungry: one document at a time per worker
+# process, and recycle the process periodically so a leak in a native library
+# cannot accumulate.
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_WORKER_MAX_TASKS_PER_CHILD = config(
+    'CELERY_WORKER_MAX_TASKS_PER_CHILD', default=50, cast=int
+)
+
+CELERY_TASK_TIME_LIMIT = config('CELERY_TASK_TIME_LIMIT', default=1800, cast=int)
+CELERY_TASK_SOFT_TIME_LIMIT = config('CELERY_TASK_SOFT_TIME_LIMIT', default=1680, cast=int)
+
+# Run tasks inline instead of dispatching them. Set by test.py, and useful
+# locally when you don't want to run a worker.
+CELERY_TASK_ALWAYS_EAGER = config('CELERY_TASK_ALWAYS_EAGER', default=False, cast=bool)
+CELERY_TASK_EAGER_PROPAGATES = True
 
 # ═══════════════════════════════════════════════════════════════
 # PASSWORD VALIDATION
@@ -158,9 +255,11 @@ SIMPLE_JWT = {
 GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
 
 # Seed account used by `python manage.py create_admin`.
-DEFAULT_ADMIN_EMAIL    = config('DEFAULT_ADMIN_EMAIL',    default='rehanvhora86@gmail.com')
-DEFAULT_ADMIN_PASSWORD = config('DEFAULT_ADMIN_PASSWORD', default='rehan@786')
-DEFAULT_ADMIN_NAME     = config('DEFAULT_ADMIN_NAME',     default='Rehan Vhora')
+# The password has NO default on purpose: a default shipped in the repository
+# means every clone has an admin account whose password anyone can read.
+DEFAULT_ADMIN_EMAIL    = config('DEFAULT_ADMIN_EMAIL',    default='admin@example.com')
+DEFAULT_ADMIN_PASSWORD = config('DEFAULT_ADMIN_PASSWORD', default='')
+DEFAULT_ADMIN_NAME     = config('DEFAULT_ADMIN_NAME',     default='Administrator')
 
 # ═══════════════════════════════════════════════════════════════
 # EMAIL — delivers the one-time codes for sign-up and password reset
@@ -194,7 +293,7 @@ else:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 # ═══════════════════════════════════════════════════════════════
-# OTP — one-time codes (stored in MongoDB, never in plaintext)
+# OTP — one-time codes (never stored in plaintext)
 # ═══════════════════════════════════════════════════════════════
 
 OTP_LENGTH                  = 6
@@ -224,7 +323,9 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.ScopedRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'chat': config('CHAT_THROTTLE_RATE', default='20/min'),
+        'chat':   config('CHAT_THROTTLE_RATE',   default='20/min'),
+        'upload': config('UPLOAD_THROTTLE_RATE', default='30/hour'),
+        'auth':   config('AUTH_THROTTLE_RATE',   default='10/min'),
     },
     'EXCEPTION_HANDLER': 'core.exceptions.custom_exception_handler',
     'DEFAULT_RENDERER_CLASSES': [
@@ -270,7 +371,7 @@ STATIC_URL  = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
-# On Railway, VOLUME_PATH points to the persistent disk mount
+# On Railway/Render, VOLUME_PATH points to the persistent disk mount.
 _VOLUME = Path(os.environ.get('VOLUME_PATH', str(BASE_DIR)))
 MEDIA_ROOT = _VOLUME / 'media'
 
@@ -279,6 +380,8 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 
 MAX_DOCUMENT_SIZE_MB = config('MAX_DOCUMENT_SIZE_MB', default=50, cast=int)
+# Ceiling on how many documents one non-staff account may keep. 0 disables it.
+MAX_DOCUMENTS_PER_USER = config('MAX_DOCUMENTS_PER_USER', default=50, cast=int)
 
 ALLOWED_DOCUMENT_EXTENSIONS = ['pdf', 'docx', 'txt']
 ALLOWED_DOCUMENT_MIME_TYPES = [
@@ -297,8 +400,13 @@ PDF_EXTRACT_TABLES = config('PDF_EXTRACT_TABLES', default=False, cast=bool)
 OCR_MAX_WORKERS = config('OCR_MAX_WORKERS', default=6, cast=int)
 
 # ═══════════════════════════════════════════════════════════════
-# FAISS
+# VECTOR STORE
 # ═══════════════════════════════════════════════════════════════
+
+# Which VectorStoreInterface implementation the retriever uses.
+#   'faiss'    — per-user on-disk IndexFlatIP files (the original)
+#   'pgvector' — vectors stored alongside their chunks in PostgreSQL
+VECTOR_BACKEND = config('VECTOR_BACKEND', default='faiss')
 
 FAISS_INDEX_DIR = _VOLUME / 'indexes'
 FAISS_INDEX_DIR.mkdir(exist_ok=True)
@@ -308,8 +416,9 @@ MEDIA_ROOT.mkdir(exist_ok=True)
 # EMBEDDINGS
 # ═══════════════════════════════════════════════════════════════
 
+EMBEDDING_PROVIDER   = config('EMBEDDING_PROVIDER', default='local')
 EMBEDDING_MODEL_NAME = config('EMBEDDING_MODEL_NAME', default='all-MiniLM-L6-v2')
-EMBEDDING_DIMENSION  = 384
+EMBEDDING_DIMENSION  = config('EMBEDDING_DIMENSION', default=384, cast=int)
 # Larger batches cut Python overhead when embedding many chunks on CPU.
 EMBEDDING_BATCH_SIZE = config('EMBEDDING_BATCH_SIZE', default=64, cast=int)
 
@@ -323,8 +432,12 @@ EMBEDDING_ONNX_PROVIDER = config('EMBEDDING_ONNX_PROVIDER', default='auto')
 EMBEDDING_PRELOAD       = config('EMBEDDING_PRELOAD',       default=True, cast=bool)
 
 # ═══════════════════════════════════════════════════════════════
-# GROQ LLM
+# LLM PROVIDERS
 # ═══════════════════════════════════════════════════════════════
+
+# Which adapter answers questions. 'groq' is the only one wired up; the registry
+# exists so adding another is a new file rather than a pipeline change.
+LLM_PROVIDER = config('LLM_PROVIDER', default='groq')
 
 GROQ_API_KEY           = config('GROQ_API_KEY', default='')
 # Groq retires models without notice. llama-3.3-70b-versatile was the default
@@ -359,6 +472,19 @@ RAG_MMR_LAMBDA           = config('RAG_MMR_LAMBDA',           default=0.7,  cast
 
 # Low floor only — the grounding prompt is the real relevance judge.
 RAG_MIN_SIMILARITY_SCORE = config('RAG_MIN_SIMILARITY_SCORE', default=0.2,  cast=float)
+
+# --- Hybrid retrieval (built in Phase 6; off until then) ---
+RAG_HYBRID_ENABLED    = config('RAG_HYBRID_ENABLED',  default=False, cast=bool)
+RAG_KEYWORD_TOP_K     = config('RAG_KEYWORD_TOP_K',   default=24,    cast=int)
+# Reciprocal Rank Fusion smoothing constant. 60 is the value from the original
+# RRF paper and what most implementations use.
+RAG_RRF_K             = config('RAG_RRF_K',           default=60,    cast=int)
+RAG_RERANK_ENABLED    = config('RAG_RERANK_ENABLED',  default=False, cast=bool)
+RAG_RERANK_MODEL      = config('RAG_RERANK_MODEL',
+                               default='cross-encoder/ms-marco-MiniLM-L-6-v2')
+RAG_QUERY_REWRITE     = config('RAG_QUERY_REWRITE',   default=False, cast=bool)
+# Hard ceiling on characters of retrieved context handed to the LLM.
+RAG_MAX_CONTEXT_CHARS = config('RAG_MAX_CONTEXT_CHARS', default=12000, cast=int)
 
 # When True, the chat API returns retrieved-chunk diagnostics (page/score/preview).
 RAG_DEBUG                = config('RAG_DEBUG',                default=False, cast=bool)
@@ -441,19 +567,10 @@ LOGGING = {
             'level': 'DEBUG' if DEBUG else 'INFO',
             'propagate': False,
         },
+        'rag': {
+            'handlers': ['console', 'app_file', 'error_file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
     },
 }
-
-# ═══════════════════════════════════════════════════════════════
-# SECURITY HARDENING (production)
-# ═══════════════════════════════════════════════════════════════
-
-if not DEBUG:
-    SECURE_BROWSER_XSS_FILTER      = True
-    SECURE_CONTENT_TYPE_NOSNIFF    = True
-    X_FRAME_OPTIONS                = 'DENY'
-    SECURE_HSTS_SECONDS            = 31536000
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD            = True
-    SESSION_COOKIE_SECURE          = True
-    CSRF_COOKIE_SECURE             = True

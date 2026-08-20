@@ -37,8 +37,8 @@ class Command(BaseCommand):
         if opts['document']:
             try:
                 query['_id'] = ObjectId(opts['document'])
-            except Exception:
-                raise CommandError(f"Invalid document id: {opts['document']}")
+            except Exception as exc:
+                raise CommandError(f"Invalid document id: {opts['document']}") from exc
         if opts['user'] is not None:
             query['user_id'] = opts['user']
 

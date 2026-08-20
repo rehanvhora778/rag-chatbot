@@ -37,7 +37,9 @@ class DocumentsConfig(AppConfig):
         # Step 1 runs whether or not the preload is enabled — the thread race it
         # prevents comes from concurrent uploads, not from the preload alone.
         from services.embeddings import (
-            ensure_numpy_loaded, ensure_http_stack_loaded, preload_embedding_model_async,
+            ensure_http_stack_loaded,
+            ensure_numpy_loaded,
+            preload_embedding_model_async,
         )
         ensure_numpy_loaded()
         ensure_http_stack_loaded()

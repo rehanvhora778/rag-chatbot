@@ -5,10 +5,11 @@ Two jobs:
   * generate_rag_response()      answers a question from retrieved document text
   * read_image()                 OCRs a scanned PDF page rendered as an image
 """
+import logging
 import re
 import time
-import logging
-from typing import List, Dict
+from typing import Dict, List
+
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ def _call_with_retry(messages, max_retries: int = 3) -> str:
                 temperature=settings.GROQ_TEMPERATURE,
             )
             return response.choices[0].message.content
-        except groq_lib.RateLimitError as exc:
+        except groq_lib.RateLimitError:
             if attempt < max_retries:
                 logger.warning("Groq rate limit (attempt %d/%d). Retrying in %ds...", attempt, max_retries, delay)
                 time.sleep(delay)

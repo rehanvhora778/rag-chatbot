@@ -14,10 +14,10 @@ Rendering: WeasyPrint when available (best fidelity), otherwise xhtml2pdf — a
 pure-Python engine with zero native dependencies that always works on Windows.
 """
 import io
-import re
 import logging
+import re
 from html import escape as _escape
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,9 @@ def _markdown_to_html(md_text: str) -> str:
             'guess_lang': False,
             'pygments_style': 'friendly',
         }
-    except Exception:
-        pass  # Pygments missing — code blocks still render as monospace.
+    except Exception as exc:
+        # Pygments missing — code blocks still render as monospace.
+        logger.debug("Pygments unavailable, code blocks will not be highlighted: %s", exc)
 
     return markdown.markdown(
         text,

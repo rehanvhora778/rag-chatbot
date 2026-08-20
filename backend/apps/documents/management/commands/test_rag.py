@@ -17,8 +17,8 @@ from bson import ObjectId
 from django.core.management.base import BaseCommand, CommandError
 
 from core.mongo import chat_sessions_col
+from services.llm import REFUSAL_MESSAGE, generate_rag_response
 from services.rag_pipeline import retrieve_relevant_chunks
-from services.llm import generate_rag_response, REFUSAL_MESSAGE
 
 DEFAULT_QUESTIONS = [
     "What are embeddings?",
@@ -66,8 +66,8 @@ class Command(BaseCommand):
         if opts['session']:
             try:
                 session = chat_sessions_col().find_one({'_id': ObjectId(opts['session'])})
-            except Exception:
-                raise CommandError(f"Invalid session id: {opts['session']}")
+            except Exception as exc:
+                raise CommandError(f"Invalid session id: {opts['session']}") from exc
             if not session:
                 raise CommandError("Session not found.")
             return session['user_id'], session.get('document_ids', [])

@@ -1,0 +1,197 @@
+# ============================================================
+# Local development stack
+# ============================================================
+#   cp .env.docker.example .env
+#   docker compose up --build
+#
+#   frontend  http://localhost:3000
+#   API       http://localhost:8000/api/health/
+#   admin     http://localhost:8000/django-admin/
+#
+# Source is bind-mounted for backend and frontend, so edits reload without a
+# rebuild. Rebuild only when a dependency changes.
+
+name: ragchatbot
+
+services:
+  # ----------------------------------------------------------
+  # PostgreSQL with the pgvector extension compiled in.
+  # The plain `postgres` image does not have it; installing it at runtime would
+  # have to happen on every container start.
+  # ----------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-raguser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ragpass}
+      POSTGRES_DB: ${POSTGRES_DB:-ragchatbot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Runs once, on an empty data directory only: enables the extension so
+      # Django's migrations can create vector columns without superuser rights.
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      # Both user and database named, or pg_isready reports ready while the
+      # application database is still being created by initdb.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raguser} -d ${POSTGRES_DB:-ragchatbot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Redis — Celery broker and result backend.
+  # ----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    # appendonly so a queued-but-unstarted ingestion job survives a restart of
+    # this container.
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # MongoDB — the legacy store. Present so PERSISTENCE_BACKEND=mongo still runs
+  # in the stack, and so `migrate_from_mongo` has a source to read from.
+  # Started only with:  docker compose --profile legacy up
+  # ----------------------------------------------------------
+  mongo:
+    image: mongo:7
+    profiles: ["legacy"]
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Django API
+  # ----------------------------------------------------------
+  api:
+    build:
+      context: ./backend
+      target: development
+    command: >
+      sh -c "python manage.py migrate --no-input &&
+             python manage.py runserver 0.0.0.0:8000"
+    environment: &backend_env
+      DJANGO_ENV: development
+      DEBUG: "True"
+      SECRET_KEY: ${SECRET_KEY:-dev-only-secret-not-for-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-raguser}:${POSTGRES_PASSWORD:-ragpass}@postgres:5432/${POSTGRES_DB:-ragchatbot}
+      REDIS_URL: redis://redis:6379/0
+      MONGODB_HOST: mongodb://mongo:27017
+      MONGODB_DB: ${MONGODB_DB:-ragchatbot}
+      PERSISTENCE_BACKEND: ${PERSISTENCE_BACKEND:-mongo}
+      VECTOR_BACKEND: ${VECTOR_BACKEND:-faiss}
+      CACHE_ENABLED: "True"
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      # No GPU inside the container, and the preload deadlocks when the ONNX
+      # session is built on a short-lived thread and then used from another.
+      EMBEDDING_BACKEND: onnx
+      EMBEDDING_ONNX_PROVIDER: cpu
+      EMBEDDING_PRELOAD: "False"
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@example.com}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
+    volumes:
+      - ./backend:/app
+      # Named volumes, not bind mounts: uploads, indexes and the HF model cache
+      # are container state. Bind-mounting them onto the host would let a
+      # Windows path or permission difference break the container.
+      - media_data:/app/media
+      - index_data:/app/indexes
+      - hf_cache:/home/appuser/.cache/huggingface
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Celery worker — document ingestion. Same image, same env, same volumes as
+  # the API: it must be able to read the file the API just wrote.
+  # ----------------------------------------------------------
+  worker:
+    build:
+      context: ./backend
+      target: development
+    command: celery -A config worker --loglevel=info --concurrency=2
+    environment: *backend_env
+    volumes:
+      - ./backend:/app
+      - media_data:/app/media
+      - index_data:/app/indexes
+      - hf_cache:/home/appuser/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Celery beat — periodic jobs (stale-document sweep, cache warming).
+  # ----------------------------------------------------------
+  beat:
+    build:
+      context: ./backend
+      target: development
+    command: celery -A config beat --loglevel=info
+    environment: *backend_env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # React dev server
+  # ----------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    environment:
+      VITE_API_BASE_URL: http://localhost:${API_PORT:-8000}
+      VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    volumes:
+      - ./frontend:/app
+      # Anonymous volume so the image's node_modules is not shadowed by the
+      # host's — which on Windows contains no Linux binaries at all.
+      - /app/node_modules
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  mongo_data:
+  media_data:
+  index_data:
+  hf_cache:

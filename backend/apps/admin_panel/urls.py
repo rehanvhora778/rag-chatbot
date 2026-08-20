@@ -1,8 +1,12 @@
 from django.urls import path
+
 from .views import (
-    AdminSystemStatsView, AdminUserListView, AdminUserDetailView,
-    AdminDocumentListView, AdminDocumentDetailView,
     AdminChatSessionListView,
+    AdminDocumentDetailView,
+    AdminDocumentListView,
+    AdminSystemStatsView,
+    AdminUserDetailView,
+    AdminUserListView,
 )
 
 urlpatterns = [

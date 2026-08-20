@@ -30,6 +30,17 @@ google-auth==2.35.0
 # depend on what else happened to be installed. Declared explicitly so it does not.
 requests==2.34.2
 
+# Database — PostgreSQL + pgvector (the target store). psycopg 3 is what
+# Django 4.2 uses when both are installed. dj-database-url parses DATABASE_URL.
+psycopg[binary]==3.2.3
+pgvector==0.3.6
+dj-database-url==2.3.0
+
+# Background processing — document ingestion runs on a Celery worker instead of
+# a daemon thread inside the web process.
+celery[redis]==5.4.0
+redis==5.2.1
+
 # MongoDB
 pymongo[srv]==4.8.0
 dnspython==2.6.1

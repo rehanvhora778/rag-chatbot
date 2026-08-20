@@ -1,7 +1,12 @@
 from django.urls import path
+
 from .views import (
-    ChatSessionListView, ChatSessionDetailView,
-    SendMessageView, ChatSearchView, ExportChatPDFView, ChatConfigView,
+    ChatConfigView,
+    ChatSearchView,
+    ChatSessionDetailView,
+    ChatSessionListView,
+    ExportChatPDFView,
+    SendMessageView,
 )
 
 urlpatterns = [

@@ -1,0 +1,27 @@
+# ============================================================
+# Development & CI tooling
+# ============================================================
+# Everything needed to run the test suite and the linters. Not installed in
+# production images.
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+
+# --- Testing ---
+pytest==8.3.3
+pytest-django==4.9.0
+pytest-cov==5.0.0
+# Freezes time so token-expiry and OTP-cooldown tests are deterministic instead
+# of depending on how long the suite took to get to them.
+pytest-freezegun==0.4.2
+# Builds valid model instances without every test repeating the same setup.
+factory-boy==3.3.1
+# Fails a test that makes a real outbound HTTP call — the LLM and embedding
+# providers must be mocked, and this is what proves they were.
+responses==0.25.3
+
+# --- Linting / formatting ---
+ruff==0.7.4
+
+# --- Security ---
+# Scans dependencies against the PyPI advisory database in CI.
+pip-audit==2.7.3

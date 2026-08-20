@@ -10,7 +10,7 @@ image and read by Groq Vision (OCR) instead.
 """
 import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,8 @@ def _extract_pdf_tables(page) -> str:
     for table in tables:
         try:
             rows = table.extract()
-        except Exception:
+        except Exception as exc:
+            logger.debug("Table extraction failed on one table: %s", exc)
             continue
         # Keep only non-empty rows
         rows = [
@@ -66,8 +67,8 @@ def _extract_pdf_text_native(page) -> str:
         text = "\n".join(parts).strip()
         if text:
             return text
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Block text extraction failed, trying rawdict: %s", exc)
 
     # Method 3: raw dict (individual characters)
     try:
@@ -81,8 +82,8 @@ def _extract_pdf_text_native(page) -> str:
         text = "".join(chars).strip()
         if text:
             return text
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Rawdict text extraction failed: %s", exc)
 
     return ""
 
@@ -94,8 +95,9 @@ def _render_page_png_b64(page) -> str:
     thread-safe: rendering must happen on the main thread, while the network
     OCR call (below) can safely fan out across a thread pool.
     """
-    import fitz
     import base64
+
+    import fitz
 
     mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for better OCR quality
     pix = page.get_pixmap(matrix=mat)
@@ -131,6 +133,7 @@ def extract_text_from_pdf(file_path: str) -> List[Dict[str, Any]]:
     """
     import fitz  # PyMuPDF
     from django.conf import settings
+
     from services.chunker import clean_text
 
     pages = []

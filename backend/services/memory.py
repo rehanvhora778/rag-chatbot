@@ -3,10 +3,12 @@ Module 12: Conversation Memory
 Retrieves and formats the last N turns of a chat session for context injection.
 """
 import logging
-from typing import List, Dict
+from typing import Dict, List
+
 from django.conf import settings
+
+from core.constants import ROLE_USER
 from core.mongo import messages_col
-from core.constants import ROLE_USER, ROLE_ASSISTANT
 
 logger = logging.getLogger(__name__)
 

@@ -1,19 +1,21 @@
 import logging
 import os
-from django.contrib.auth.models import User
-from django.utils import timezone
 from datetime import timedelta
-from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
-# aliased: `status` is used as a local variable for document filtering below
-from rest_framework import status as status_codes
 
-from core.mongo import documents_col, chat_sessions_col, messages_col, analytics_col
-from core.permissions import IsAdminUser
-from core.responses import APIResponse
-from core.utils import serialize_mongo_doc, format_file_size
 from bson import ObjectId
 from bson.errors import InvalidId
+from django.contrib.auth.models import User
+from django.utils import timezone
+
+# aliased: `status` is used as a local variable for document filtering below
+from rest_framework import status as status_codes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+
+from core.mongo import analytics_col, chat_sessions_col, documents_col, messages_col
+from core.permissions import IsAdminUser
+from core.responses import APIResponse
+from core.utils import format_file_size, serialize_mongo_doc
 
 logger = logging.getLogger(__name__)
 
@@ -242,15 +244,17 @@ class AdminDocumentDetailView(APIView):
         if file_path and os.path.exists(file_path):
             try:
                 os.remove(file_path)
-            except Exception:
-                pass
+            except OSError as exc:
+                # The record still goes away, so log loudly: the file is now
+                # orphaned on disk and nothing else will ever clean it up.
+                logger.warning("Could not delete %s: %s", file_path, exc)
 
         # Delete FAISS index
         try:
             from services.faiss_store import delete_index
             delete_index(doc['user_id'], doc_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Could not delete the FAISS index for %s: %s", doc_id, exc)
 
         from core.mongo import chunks_col
         chunks_col().delete_many({'document_id': doc_id})

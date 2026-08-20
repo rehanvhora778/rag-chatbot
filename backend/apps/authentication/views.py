@@ -2,21 +2,25 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth.models import User, update_last_login
-from django.utils import timezone
 from rest_framework import status
-from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
-from rest_framework_simplejwt.exceptions import TokenError
 
-from core.responses import APIResponse
-from core.mongo import analytics_col, otps_col
+from core.analytics import record_event
 from core.constants import EVENT_LOGIN
+from core.mongo import otps_col
+from core.responses import APIResponse
+
 from . import otp
 from .serializers import (
-    RegisterSerializer, UserProfileSerializer, ChangePasswordSerializer,
-    PasswordResetConfirmSerializer, create_user_from_pending,
+    ChangePasswordSerializer,
+    PasswordResetConfirmSerializer,
+    RegisterSerializer,
+    UserProfileSerializer,
+    create_user_from_pending,
     get_or_create_google_user,
 )
 
@@ -53,15 +57,7 @@ def _session_payload(user):
 def _record_login(user, method):
     # Our custom login flow bypasses Django's automatic last_login update.
     update_last_login(None, user)
-    try:
-        analytics_col().insert_one({
-            'user_id': user.id,
-            'event_type': EVENT_LOGIN,
-            'metadata': {'email': user.email, 'method': method},
-            'created_at': timezone.now(),
-        })
-    except Exception:
-        pass
+    record_event(user.id, EVENT_LOGIN, {'email': user.email, 'method': method})
 
 
 class RegisterView(APIView):

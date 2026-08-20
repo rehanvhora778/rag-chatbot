@@ -1,10 +1,11 @@
 import logging
 from typing import Optional
-from pymongo import MongoClient, ASCENDING, DESCENDING
+
+from django.conf import settings
+from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
-from django.conf import settings
 
 logger = logging.getLogger(__name__)
 

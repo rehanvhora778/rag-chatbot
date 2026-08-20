@@ -1,0 +1,29 @@
+# Build context hygiene: everything here either bloats the image, leaks a
+# secret, or is regenerated inside the container anyway.
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+venv/
+.venv/
+
+db.sqlite3
+db.sqlite3-journal
+
+# Runtime state — bind-mounted or recreated, never baked in.
+media/
+indexes/
+logs/
+staticfiles/
+
+.git/
+.gitignore
+*.md

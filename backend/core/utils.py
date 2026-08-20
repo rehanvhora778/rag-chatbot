@@ -1,8 +1,9 @@
-import uuid
 import hashlib
 import logging
+import uuid
 from pathlib import Path
 from typing import Optional
+
 from django.conf import settings
 
 logger = logging.getLogger(__name__)

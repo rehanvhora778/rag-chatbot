@@ -1,19 +1,24 @@
 import logging
-from django.http import HttpResponse
-from django.utils import timezone
+
 from bson import ObjectId
 from bson.errors import InvalidId
-from rest_framework.views import APIView
+from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
 
-from core.mongo import chat_sessions_col, messages_col, documents_col, analytics_col
+from core.analytics import record_event
+from core.constants import EVENT_EXPORT, EVENT_QUERY, SESSION_ACTIVE, SESSION_ARCHIVED
+from core.mongo import chat_sessions_col, documents_col, messages_col
 from core.responses import APIResponse
 from core.utils import serialize_mongo_doc
-from core.constants import SESSION_ACTIVE, SESSION_ARCHIVED, EVENT_QUERY, EVENT_EXPORT
+from services.pdf_export import build_export_filename, export_chat_to_pdf
 from services.rag_pipeline import run_rag_query
-from services.pdf_export import export_chat_to_pdf, build_export_filename
+
 from .serializers import (
-    CreateSessionSerializer, UpdateSessionSerializer, SendMessageSerializer,
+    CreateSessionSerializer,
+    SendMessageSerializer,
+    UpdateSessionSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -138,7 +143,7 @@ class ChatSessionDetailView(APIView):
         if not serializer.is_valid():
             return APIResponse.error('Validation failed.', serializer.errors)
 
-        updates = {k: v for k, v in serializer.validated_data.items()}
+        updates = dict(serializer.validated_data)
 
         # Changing which documents the chat is grounded in. Re-validate against
         # this user's own completed documents so a crafted id can never attach
@@ -226,20 +231,11 @@ class SendMessageView(APIView):
             logger.error("RAG query failed: %s", exc, exc_info=True)
             return APIResponse.server_error('Failed to generate response. Please try again.')
 
-        # Log analytics
-        try:
-            analytics_col().insert_one({
-                'user_id':    request.user.id,
-                'event_type': EVENT_QUERY,
-                'metadata':   {
-                    'session_id': session_id,
-                    'question_length': len(question),
-                    'chunks_retrieved': result['chunks_retrieved'],
-                },
-                'created_at': timezone.now(),
-            })
-        except Exception:
-            pass
+        record_event(request.user.id, EVENT_QUERY, {
+            'session_id': session_id,
+            'question_length': len(question),
+            'chunks_retrieved': result['chunks_retrieved'],
+        })
 
         from django.conf import settings
         debug_enabled = settings.RAG_DEBUG or request.query_params.get('debug') == 'true'
@@ -343,16 +339,7 @@ class ExportChatPDFView(APIView):
             messages=msgs,
         )
 
-        # Log analytics
-        try:
-            analytics_col().insert_one({
-                'user_id':    request.user.id,
-                'event_type': EVENT_EXPORT,
-                'metadata':   {'session_id': session_id},
-                'created_at': timezone.now(),
-            })
-        except Exception:
-            pass
+        record_event(request.user.id, EVENT_EXPORT, {'session_id': session_id})
 
         filename = build_export_filename(session.get('title', 'Document'), msgs)
         response = HttpResponse(pdf_bytes, content_type='application/pdf')

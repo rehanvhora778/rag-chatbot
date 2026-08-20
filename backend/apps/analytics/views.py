@@ -1,12 +1,13 @@
 import logging
-from django.utils import timezone
 from datetime import timedelta
-from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
 
-from core.mongo import analytics_col, documents_col, chat_sessions_col, messages_col
+from django.utils import timezone
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+
+from core.constants import EVENT_EXPORT, EVENT_QUERY, EVENT_SUMMARY, EVENT_UPLOAD
+from core.mongo import analytics_col, chat_sessions_col, documents_col, messages_col
 from core.responses import APIResponse
-from core.constants import EVENT_UPLOAD, EVENT_QUERY, EVENT_EXPORT, EVENT_SUMMARY
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,7 @@ class UserDashboardView(APIView):
             .limit(5)
         )
 
-        from core.utils import serialize_mongo_doc, format_file_size
+        from core.utils import format_file_size, serialize_mongo_doc
 
         def ser_doc(d):
             r = serialize_mongo_doc(d)

@@ -14,7 +14,7 @@ guessing — that refusal is what keeps the answers honest.
 import logging
 import time
 from datetime import timedelta
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 from bson import ObjectId
 from django.conf import settings
@@ -115,9 +115,9 @@ def run_rag_query(
     question: str,
 ) -> Dict[str, Any]:
     """Answer one question against a session's documents and save the exchange."""
-    from core.mongo import messages_col, chat_sessions_col
-    from core.constants import ROLE_USER, ROLE_ASSISTANT
-    from services.llm import generate_rag_response, REFUSAL_MESSAGE
+    from core.constants import ROLE_ASSISTANT, ROLE_USER
+    from core.mongo import chat_sessions_col, messages_col
+    from services.llm import REFUSAL_MESSAGE, generate_rag_response
     from services.memory import get_conversation_history, summarize_history_if_long
 
     # --- Retrieve ---

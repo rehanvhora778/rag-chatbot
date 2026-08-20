@@ -5,18 +5,24 @@ from pathlib import Path
 from bson import ObjectId
 from bson.errors import InvalidId
 from django.utils import timezone
-from rest_framework.views import APIView
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.views import APIView
 
-from core.mongo import documents_col, chunks_col
+from core.analytics import record_event
+from core.constants import EVENT_UPLOAD, STATUS_PENDING
+from core.mongo import chunks_col, documents_col
 from core.responses import APIResponse
 from core.utils import (
-    generate_unique_filename, compute_file_hash, get_file_extension,
-    get_user_upload_dir, serialize_mongo_doc, format_file_size
+    compute_file_hash,
+    format_file_size,
+    generate_unique_filename,
+    get_file_extension,
+    get_user_upload_dir,
+    serialize_mongo_doc,
 )
-from core.constants import STATUS_PENDING, EVENT_UPLOAD
 from services.document_processor import process_document
+
 from .serializers import RenameDocumentSerializer
 
 logger = logging.getLogger(__name__)
@@ -117,17 +123,9 @@ class DocumentListUploadView(APIView):
             document_id = str(result.inserted_id)
             doc['_id'] = document_id
 
-            # Log analytics
-            try:
-                from core.mongo import analytics_col
-                analytics_col().insert_one({
-                    'user_id':    request.user.id,
-                    'event_type': EVENT_UPLOAD,
-                    'metadata':   {'document_id': document_id, 'filename': f.name, 'file_type': ext},
-                    'created_at': now,
-                })
-            except Exception:
-                pass
+            record_event(request.user.id, EVENT_UPLOAD, {
+                'document_id': document_id, 'filename': f.name, 'file_type': ext,
+            })
 
             # Process in background thread
             thread = threading.Thread(
@@ -274,8 +272,8 @@ class DocumentSummaryView(APIView):
             return APIResponse.error('Document has not finished processing yet.')
 
         def _regen():
-            from services.text_extractor import extract_text
             from services.llm import generate_document_summary
+            from services.text_extractor import extract_text
             try:
                 pages = extract_text(doc['file_path'], doc['file_type'])
                 summary = generate_document_summary(pages)

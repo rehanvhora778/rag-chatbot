@@ -56,12 +56,12 @@ def process_document(document_id: str, user_id: int, file_path: str, file_type: 
     Safe to re-run: existing chunks and the FAISS index are dropped first, so
     the embeddings are always rebuilt fresh rather than duplicated.
     """
-    from core.mongo import documents_col, chunks_col
-    from core.constants import STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED
-    from services.text_extractor import extract_text, get_word_count
+    from core.constants import STATUS_COMPLETED, STATUS_FAILED, STATUS_PROCESSING
+    from core.mongo import chunks_col, documents_col
     from services.chunker import chunk_pages
     from services.embeddings import embed_chunks
-    from services.faiss_store import save_index, delete_index
+    from services.faiss_store import delete_index, save_index
+    from services.text_extractor import extract_text, get_word_count
 
     doc_oid = ObjectId(document_id)
     started = time.perf_counter()
@@ -129,7 +129,7 @@ def process_document(document_id: str, user_id: int, file_path: str, file_type: 
                 'embedding':   Binary(vector.tobytes()),
                 'created_at':  now,
             }
-            for chunk, vector in zip(chunks, embeddings)
+            for chunk, vector in zip(chunks, embeddings, strict=False)
         ])
         chunk_ids = [str(oid) for oid in inserted.inserted_ids]
         save_index(user_id, document_id, embeddings, chunk_ids)

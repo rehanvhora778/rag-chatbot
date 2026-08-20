@@ -13,10 +13,11 @@ straddles a boundary still appears whole in one of them.
 Each page is chunked separately (see chunk_pages), which is what lets every
 chunk — and therefore every answer — carry the exact page it came from.
 """
-import re
 import logging
+import re
 import unicodedata
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
