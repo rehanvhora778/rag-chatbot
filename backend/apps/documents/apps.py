@@ -20,10 +20,15 @@ class DocumentsConfig(AppConfig):
           2. The embedding model is warmed in the background, so the first
              upload or chat message doesn't wait for it to load.
         """
+        # Registers the ragchat system checks. Importing here rather than at
+        # module scope keeps them out of the import graph until the app
+        # registry is ready, which is what they inspect.
         import os
         import sys
 
         from django.conf import settings
+
+        import core.checks  # noqa: F401
 
         argv = ' '.join(sys.argv)
         if 'runserver' in argv:

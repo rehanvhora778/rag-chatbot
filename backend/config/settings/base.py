@@ -39,6 +39,11 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
+    # Full-text search field types and lookups. Harmless on SQLite: it only
+    # registers lookups and field classes, and the PostgreSQL-only indexes are
+    # attached by a vendor-guarded migration.
+    'django.contrib.postgres',
+
     # Third-party
     'rest_framework',
     'rest_framework_simplejwt',
@@ -51,6 +56,7 @@ INSTALLED_APPS = [
     'apps.chat',
     'apps.analytics',
     'apps.admin_panel',
+    'apps.evaluation',
 ]
 
 # ═══════════════════════════════════════════════════════════════
