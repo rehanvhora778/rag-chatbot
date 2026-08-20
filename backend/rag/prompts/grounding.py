@@ -73,17 +73,31 @@ QUESTION:
 {question}"""
 
 
-def build_rag_prompt() -> ChatPromptTemplate:
+def build_rag_prompt(nonce: str = '') -> ChatPromptTemplate:
     """The chat prompt used for every grounded answer.
 
     ``partial`` binds the refusal sentence once, so callers supply only the
     three things that change per question and cannot accidentally pass a
     different refusal.
+
+    When a `nonce` is given, the data-versus-instructions clause is appended,
+    naming the exact delimiters the context is wrapped in. It is added rather
+    than always present because the rule has to refer to a real, unforgeable
+    boundary to mean anything — a clause about "the context" in the abstract is
+    advice, while one naming a token the document could not have predicted is
+    a rule.
     """
+    system = SYSTEM_PROMPT.replace('{refusal}', REFUSAL_MESSAGE)
+
+    if nonce:
+        from rag.security.injection import boundary_instruction
+
+        system = system + '\n' + boundary_instruction(nonce)
+
     return ChatPromptTemplate.from_messages([
         ('system', '{system}'),
         ('human', USER_TEMPLATE),
-    ]).partial(system=SYSTEM_PROMPT.replace('{refusal}', REFUSAL_MESSAGE))
+    ]).partial(system=system)
 
 
 SUMMARY_PROMPT = ChatPromptTemplate.from_messages([

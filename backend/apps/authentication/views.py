@@ -13,6 +13,12 @@ from core.analytics import record_event
 from core.constants import EVENT_LOGIN
 from core.mongo import otps_col
 from core.responses import APIResponse
+from core.throttling import (
+    AuthRateThrottle,
+    clear_failures,
+    lockout_message,
+    record_failure,
+)
 
 from . import otp
 from .serializers import (
@@ -70,6 +76,9 @@ class RegisterView(APIView):
     """
 
     permission_classes = [AllowAny]
+    # sign-up: sends an email, so also a spam vector
+    throttle_classes = [AuthRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -92,6 +101,9 @@ class RegisterResendView(APIView):
     """Re-issues the sign-up code for a pending registration."""
 
     permission_classes = [AllowAny]
+    # resend: the most abusable email trigger
+    throttle_classes = [AuthRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         email = str(request.data.get('email', '')).strip().lower()
@@ -115,6 +127,9 @@ class RegisterVerifyView(APIView):
     """Step 2 of sign-up: check the code, create the account, sign the user in."""
 
     permission_classes = [AllowAny]
+    # verifies a 6-digit code — brute-forceable without a limit
+    throttle_classes = [AuthRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         email = str(request.data.get('email', '')).strip().lower()
@@ -154,6 +169,9 @@ class PasswordResetRequestView(APIView):
     """
 
     permission_classes = [AllowAny]
+    # sends an email to an arbitrary address
+    throttle_classes = [AuthRateThrottle]
+    throttle_scope = 'auth'
 
     GENERIC = 'If an account exists for that email, a reset code is on its way.'
 
@@ -191,6 +209,9 @@ class PasswordResetVerifyView(APIView):
     """Step 2: trade a correct code for a single-use reset ticket."""
 
     permission_classes = [AllowAny]
+    # verifies a 6-digit code
+    throttle_classes = [AuthRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         email = str(request.data.get('email', '')).strip().lower()
@@ -216,6 +237,9 @@ class PasswordResetConfirmView(APIView):
     """Step 3: set the new password against the ticket from step 2."""
 
     permission_classes = [AllowAny]
+    # consumes a reset ticket
+    throttle_classes = [AuthRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
@@ -243,10 +267,20 @@ class PasswordResetConfirmView(APIView):
         return APIResponse.success(message='Password updated. You can now log in.')
 
 
+# One message for every credential failure. Saying "no account with that email"
+# and "incorrect password" separately is an account-enumeration oracle: an
+# attacker learns which addresses are registered by reading the error, which is
+# the first step of a credential-stuffing run and is also a privacy leak in its
+# own right — it discloses that a given person uses this service.
+INVALID_CREDENTIALS = 'Incorrect email or password.'
+
+
 class LoginView(APIView):
     """Email + password sign-in for regular users."""
 
     permission_classes = [AllowAny]
+    throttle_classes = [AuthRateThrottle]
+    throttle_scope = 'auth'
     admin_only = False
 
     def post(self, request):
@@ -256,16 +290,30 @@ class LoginView(APIView):
         if not email or not password:
             return APIResponse.error('Email and password are required.')
 
-        user = User.objects.filter(email__iexact=email).first()
-        if user is None:
-            return APIResponse.error('No account found with that email address.',
-                                     status_code=status.HTTP_401_UNAUTHORIZED)
+        # Checked before the password so a locked account cannot be used as an
+        # unlimited oracle, and so the expensive hash comparison is skipped.
+        locked = lockout_message(email)
+        if locked:
+            logger.warning('Sign-in attempt on locked account %r', email)
+            return APIResponse.error(locked, status_code=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        if not user.check_password(password):
-            return APIResponse.error('Incorrect password. Please try again.',
+        user = User.objects.filter(email__iexact=email).first()
+
+        # The password is checked even when no such account exists. Returning
+        # immediately would make a missing account measurably faster to reject
+        # than a wrong password, and that timing difference is the same
+        # enumeration oracle the shared message just closed.
+        password_ok = user.check_password(password) if user else _burn_password_hash(password)
+
+        if user is None or not password_ok:
+            attempts = record_failure(email)
+            logger.info('Failed sign-in for %r (%d recent failure(s))', email, attempts)
+            return APIResponse.error(INVALID_CREDENTIALS,
                                      status_code=status.HTTP_401_UNAUTHORIZED)
 
         if not user.is_active:
+            # Not a credential failure, and safe to be specific about: the
+            # caller has already proven they hold the password.
             return APIResponse.error('This account has been deactivated. Contact an administrator.',
                                      status_code=status.HTTP_403_FORBIDDEN)
 
@@ -273,9 +321,22 @@ class LoginView(APIView):
             return APIResponse.error('This account does not have administrator access.',
                                      status_code=status.HTTP_403_FORBIDDEN)
 
+        clear_failures(email)
         _record_login(user, 'admin-password' if self.admin_only else 'password')
         logger.info("User logged in: %s", user.email)
         return APIResponse.success(data=_session_payload(user), message='Login successful.')
+
+
+def _burn_password_hash(password: str) -> bool:
+    """Spend the same time hashing as a real check would, then fail.
+
+    Django ships this exact helper for the purpose. Without it, a request for an
+    address with no account skips PBKDF2 entirely and returns in a fraction of
+    the time a wrong password takes — which is enough to enumerate accounts by
+    stopwatch however carefully the error messages are worded.
+    """
+    User().set_password(password)
+    return False
 
 
 class AdminLoginView(LoginView):
@@ -294,6 +355,9 @@ class GoogleLoginView(APIView):
     """
 
     permission_classes = [AllowAny]
+    # mints a session from a supplied token
+    throttle_classes = [AuthRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         credential = request.data.get('credential', '')

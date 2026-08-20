@@ -22,7 +22,7 @@ from django.conf import settings
 from langchain_core.documents import Document
 
 from rag.prompts.grounding import REFUSAL_MESSAGE, build_rag_prompt, format_history
-from rag.types import documents_to_chunks, format_for_prompt, truncate_to_budget
+from rag.types import documents_to_chunks, truncate_to_budget
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,9 @@ class RAGResult:
     # mode an evaluation cannot detect on its own.
     trace: dict[str, Any] = field(default_factory=dict)
     rewritten_query: str = ''
+    # Injection-shaped content noticed in the passages that were used. Never a
+    # reason to block an answer; recorded so attempts are visible.
+    security_findings: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def total_ms(self) -> int:
@@ -93,8 +96,11 @@ def build_citations(documents: list[Document]) -> list[dict[str, Any]]:
 
 
 def build_messages(question: str, documents: list[Document],
-                   history: Optional[list[dict]] = None) -> list:
+                   history: Optional[list[dict]] = None) -> tuple[list, Any]:
     """Render the grounded prompt for one question.
+
+    Returns the messages and the HardenedContext they were built from, so the
+    caller can report what was noticed in the retrieved passages.
 
     The context is trimmed to a character budget first. Without a ceiling, six
     passages from a document with long pages can exceed the model's context
@@ -102,19 +108,34 @@ def build_messages(question: str, documents: list[Document],
     end of the prompt, which is where the question is.
     """
     from rag.llm.base import Message
+    from rag.security.injection import harden_context
 
     budgeted = truncate_to_budget(documents, settings.RAG_MAX_CONTEXT_CHARS)
     if len(budgeted) < len(documents):
         logger.info('Context budget dropped %d of %d passage(s)',
                     len(documents) - len(budgeted), len(documents))
 
-    prompt = build_rag_prompt().format_messages(
-        context=format_for_prompt(budgeted),
+    # Retrieved text is untrusted input that happens to live in the user's own
+    # files. It is wrapped in delimiters carrying a nonce the document could not
+    # have predicted, and the system prompt is told that everything between them
+    # is quoted data. The content itself is never altered — an answer cites a
+    # page so a human can check it, and rewriting what the model read would make
+    # that citation point at something else.
+    hardened = harden_context(budgeted)
+
+    prompt = build_rag_prompt(nonce=hardened.nonce).format_messages(
+        context=hardened.text,
         history=format_history(history or []),
         question=question,
     )
     # LangChain message objects -> the provider-neutral shape.
-    return [Message(role=_role_of(m), content=m.content) for m in prompt]
+    messages = [Message(role=_role_of(m), content=m.content) for m in prompt]
+
+    # Returned, not stashed on the module. Module-level state would be shared
+    # by every thread in a gunicorn worker and every task in a Celery process,
+    # so two concurrent questions would report each other's findings — the kind
+    # of bug that only appears under load and cannot be reproduced on demand.
+    return messages, hardened
 
 
 def _role_of(message) -> str:
@@ -165,7 +186,8 @@ def run(user_id: int, question: str, document_keys: list[str],
     # assistant answering a question the user did not ask, and any imprecision
     # the rewrite introduced would become the answer's subject.
     llm = get_llm()
-    messages = build_messages(question, documents, history)
+    messages, hardened = build_messages(question, documents, history)
+    findings = [f.as_dict() for f in hardened.findings]
 
     started = time.perf_counter()
     response = llm.complete(messages)
@@ -189,6 +211,7 @@ def run(user_id: int, question: str, document_keys: list[str],
         truncated=response.truncated,
         trace=trace,
         rewritten_query=search_query if rewritten else '',
+        security_findings=findings,
     )
 
 
@@ -224,7 +247,10 @@ def stream(user_id: int, question: str, document_keys: list[str],
         return
 
     llm = get_llm()
-    messages = build_messages(question, documents, history)
+    messages, hardened = build_messages(question, documents, history)
+    if hardened.suspicious:
+        yield {'type': 'security',
+               'findings': [f.as_dict() for f in hardened.findings]}
 
     started = time.perf_counter()
     pieces: list[str] = []

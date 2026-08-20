@@ -58,22 +58,18 @@ class UploadOutcome:
 def validate_upload(uploaded_file) -> Optional[str]:
     """Return a rejection reason, or None when the file is acceptable.
 
-    Extension and size only, as before. Content sniffing (`filetype` is already
-    a dependency) belongs with the rest of the upload hardening in the security
-    phase — checking it here now, with nothing testing it, would be a claim the
-    project cannot back up.
+    The checks live in core/validators.py — filename, extension, size, and the
+    content actually matching what the extension claims. Adapted to a return
+    value here because the upload loop reports one reason per file rather than
+    failing the whole batch on the first bad one.
     """
-    extension = get_file_extension(uploaded_file.name)
-    allowed = settings.ALLOWED_DOCUMENT_EXTENSIONS
+    from core.validators import ValidationFailed
+    from core.validators import validate_upload as run_checks
 
-    if extension not in allowed:
-        return (f'{uploaded_file.name}: unsupported type. '
-                f'Allowed: {", ".join(allowed)}.')
-
-    limit_mb = settings.MAX_DOCUMENT_SIZE_MB
-    if uploaded_file.size > limit_mb * 1024 * 1024:
-        return f'{uploaded_file.name}: exceeds the {limit_mb} MB limit.'
-
+    try:
+        run_checks(uploaded_file, extension=get_file_extension(uploaded_file.name))
+    except ValidationFailed as exc:
+        return str(exc)
     return None
 
 

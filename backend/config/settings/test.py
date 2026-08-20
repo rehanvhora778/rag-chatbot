@@ -14,6 +14,12 @@ from .base import REST_FRAMEWORK, config
 DEBUG = False
 ALLOWED_HOSTS = ['*']
 
+# Long enough to satisfy the HS256 key-length check, so the suite is not run
+# against a configuration the project would refuse in production — and so real
+# warnings are not lost in a stream of ones the test settings caused.
+# A fixed test value, never a deployed secret.
+SECRET_KEY = 'test-only-key-not-used-anywhere-real-0123456789abcdef'  # noqa: S105
+
 # ═══════════════════════════════════════════════════════════════
 # DATABASE
 # ═══════════════════════════════════════════════════════════════

@@ -194,7 +194,12 @@ class TestDispatch:
             lambda *args, **kwargs: queued.append(args) or 'task-id',
         )
 
-        upload = SimpleUploadedFile('a.txt', b'hello world', content_type='text/plain')
+        # Large enough to clear the minimum-size check in core/validators.py:
+        # a file of a dozen bytes is truncated or empty in practice.
+        upload = SimpleUploadedFile(
+            'a.txt', b'Refunds are issued within 30 days of delivery. ' * 4,
+            content_type='text/plain',
+        )
         outcome = document_service.upload_documents(user.id, [upload])
 
         assert outcome.any_created

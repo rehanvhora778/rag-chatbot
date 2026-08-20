@@ -44,7 +44,7 @@ def generate_rag_response(question: str, context_chunks: list[dict],
     from rag.registry import get_llm
     from rag.types import chunks_to_documents
 
-    messages = build_messages(
+    messages, _hardened = build_messages(
         question, chunks_to_documents(context_chunks), conversation_history or [],
     )
     return get_llm().complete(messages).text
