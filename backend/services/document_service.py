@@ -25,6 +25,15 @@ from repositories.factory import get_conversation_repository, get_document_repos
 
 logger = logging.getLogger(__name__)
 
+# Broker reachability is cached briefly: this is checked on every upload, and a
+# dead broker would otherwise cost each one a connection timeout. Short enough
+# that starting Redis is noticed without restarting Django.
+_BROKER_CACHE_KEY = 'celery-broker-available'
+_BROKER_CACHE_SECONDS = 30
+# Short: this runs on the upload path, and a broker that is not there should
+# cost milliseconds to discover, not seconds.
+_BROKER_PROBE_TIMEOUT = 0.5
+
 
 class DocumentError(Exception):
     """A rejected upload or an invalid request, with a message meant for a user."""
@@ -161,25 +170,160 @@ def _store_and_queue(user_id: int, uploaded_file, file_hash: str) -> dict[str, A
 
 
 def queue_processing(document_id: str, user_id: int, file_path: str,
-                     file_type: str) -> None:
-    """Hand a document to whatever runs ingestion.
+                     file_type: str) -> str:
+    """Hand a document to whatever runs ingestion. Returns the task id, if any.
 
-    Still a background thread, exactly as before. This function exists so that
-    Phase 4 replaces one call with a Celery ``.delay()`` instead of editing a
-    view, and so that a test can assert a document was queued without running
-    the pipeline.
+    Celery when a broker is reachable; a daemon thread when it is not.
+
+    The fallback is not laziness — it is what keeps ``manage.py runserver`` with
+    no Redis working exactly as this project always has, so a clone can be run
+    and demonstrated without standing up infrastructure first. It is chosen by
+    whether the broker actually answers, not by a setting someone has to
+    remember to change, and it logs which path it took so a document processed
+    in-process is never a silent surprise.
+
+    The thread has the failure mode this whole phase exists to remove: a
+    restart loses the job. That is acceptable on a laptop and not in
+    production, which is why the container images run a worker.
     """
+    if broker_available():
+        from apps.documents.tasks import process_document_task
+
+        task = process_document_task.delay(document_id, user_id, file_path, file_type)
+        logger.info('Queued document %s on Celery (task %s)', document_id, task.id)
+        return task.id
+
+    logger.warning(
+        'No Celery broker reachable — processing document %s in a background '
+        'thread instead. A restart will lose this job; run a worker for '
+        'anything that matters.',
+        document_id,
+    )
+    _process_in_thread(document_id, user_id, file_path, file_type)
+    return ''
+
+
+def _process_in_thread(document_id: str, user_id: int, file_path: str,
+                       file_type: str) -> None:
     import threading
 
-    from services.document_processor import process_document
+    def _run() -> None:
+        from services.document_processor import generate_summary, process_document
 
-    thread = threading.Thread(
-        target=process_document,
-        args=(document_id, user_id, file_path, file_type),
-        daemon=True,
+        try:
+            process_document(document_id, user_id, file_path, file_type)
+        except Exception:
+            # Already marked failed with a reason by process_document, and
+            # already logged with a traceback there.
+            return
+        try:
+            generate_summary(document_id, user_id)
+        except Exception as exc:
+            logger.warning('Summary generation failed for %s: %s', document_id, exc)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def broker_available() -> bool:
+    """Is a Celery broker reachable right now?
+
+    Cached for a short time because this is on the upload path and a dead
+    broker otherwise costs every upload a connection timeout. Short enough that
+    starting Redis is picked up without restarting Django.
+    """
+    from django.core.cache import cache
+
+    if getattr(settings, 'CELERY_TASK_ALWAYS_EAGER', False):
+        # Eager mode runs tasks inline with no broker involved, which is what
+        # the test settings use.
+        return True
+
+    cached = cache.get(_BROKER_CACHE_KEY)
+    if cached is not None:
+        return cached
+
+    available = _probe_broker()
+    cache.set(_BROKER_CACHE_KEY, available, _BROKER_CACHE_SECONDS)
+    return available
+
+
+def _probe_broker() -> bool:
+    """Can the broker's port be opened?
+
+    A plain socket connect rather than ``connection.ensure_connection``. Kombu
+    does not apply its timeout to the initial TCP connect, so probing a broker
+    that is simply not there took over four seconds — paid by the first upload
+    after every restart, which is precisely the request that should feel fast.
+    A socket with an explicit timeout answers in milliseconds.
+
+    This proves the port is open, not that a healthy broker is behind it. That
+    is the right amount of certainty here: the decision being made is "dispatch
+    or fall back", and if the port is open but the broker is broken, the task
+    lands in Celery's own retry machinery, which is where that failure belongs.
+    """
+    import socket
+    from urllib.parse import urlparse
+
+    from django.conf import settings
+
+    url = urlparse(getattr(settings, 'CELERY_BROKER_URL', '') or '')
+    host = url.hostname or 'localhost'
+    port = url.port or (6379 if url.scheme.startswith('redis') else 5672)
+
+    try:
+        with socket.create_connection((host, port), timeout=_BROKER_PROBE_TIMEOUT):
+            return True
+    except OSError as exc:
+        logger.debug('Celery broker at %s:%s is not reachable: %s', host, port, exc)
+        return False
+
+
+def processing_status(user_id: int, document_ids: list[str]) -> list[dict[str, Any]]:
+    """Status of several documents in one request.
+
+    The upload screen polls while files are ingesting. Asking for each document
+    separately means N requests every couple of seconds for a batch upload, so
+    this answers for the whole batch at once and returns only the fields the
+    poll actually renders — the summary and the full text are large and change
+    rarely.
+    """
+    repository = get_document_repository()
+    statuses = []
+
+    for document_id in document_ids[:50]:
+        document = repository.get(document_id, user_id)
+        if document is None:
+            # Deleted while the page was polling. Reported rather than omitted,
+            # so the UI can stop asking instead of retrying forever.
+            statuses.append({'id': document_id, 'status': 'missing'})
+            continue
+
+        statuses.append({
+            'id': document['id'],
+            'status': document['status'],
+            'page_count': document.get('page_count', 0),
+            'chunk_count': document.get('chunk_count', 0),
+            'error_message': document.get('error_message', ''),
+            'processing_duration_ms': document.get('processing_duration_ms'),
+            'has_summary': bool((document.get('summary') or '').strip()),
+        })
+
+    return statuses
+
+
+def reprocess_document(user_id: int, document_id: str) -> str:
+    """Re-run ingestion for a document the user already owns."""
+    repository = get_document_repository()
+    document = repository.get(document_id, user_id)
+    if document is None:
+        raise DocumentError('Document not found.')
+
+    repository.update(document_id, user_id,
+                      status=STATUS_PENDING, error_message='')
+
+    return queue_processing(
+        document_id, user_id, document['file_path'], document['file_type'],
     )
-    thread.start()
-    logger.info('Queued document %s for processing', document_id)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -269,14 +413,17 @@ def regenerate_summary(user_id: int, document_id: str) -> None:
     if document.get('status') != STATUS_COMPLETED:
         raise DocumentError('Document has not finished processing yet.')
 
+    if broker_available():
+        from apps.documents.tasks import generate_summary_task
+
+        generate_summary_task.delay(document_id, user_id)
+        return
+
     def _regenerate() -> None:
-        from services.llm import generate_document_summary
-        from services.text_extractor import extract_text
+        from services.document_processor import generate_summary
 
         try:
-            pages = extract_text(document['file_path'], document['file_type'])
-            summary = generate_document_summary(pages)
-            repository.update(document_id, user_id, summary=summary)
+            generate_summary(document_id, user_id)
         except Exception as exc:
             logger.error('Summary regeneration failed for %s: %s',
                          document_id, exc, exc_info=True)

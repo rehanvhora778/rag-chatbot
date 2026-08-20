@@ -11,4 +11,11 @@ export const documentsAPI = {
   delete:     (id)     => api.delete(`/api/documents/${id}/`),
   getSummary: (id)     => api.get(`/api/documents/${id}/summary/`),
   regenSummary: (id)   => api.post(`/api/documents/${id}/summary/`),
+
+  // One request for a whole batch, not one per document: the upload screen
+  // polls this every couple of seconds while files ingest.
+  status:      (ids)   => api.get('/api/documents/status/', {
+    params: { ids: (Array.isArray(ids) ? ids : [ids]).join(',') },
+  }),
+  reprocess:   (id)    => api.post(`/api/documents/${id}/reprocess/`),
 }

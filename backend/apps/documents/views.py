@@ -108,6 +108,48 @@ class DocumentDetailView(APIView):
         return APIResponse.success(message='Document deleted successfully.')
 
 
+class DocumentStatusView(APIView):
+    """Batch status poll for documents being processed.
+
+    GET /api/documents/status/?ids=<id>,<id>
+
+    Deliberately not throttled by the upload scope: this is the endpoint the UI
+    calls every couple of seconds while a batch ingests, and rate-limiting it
+    would make the progress display stall rather than protecting anything — it
+    is a cheap read of rows the caller already owns.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        raw = request.query_params.get('ids', '')
+        ids = [i.strip() for i in raw.split(',') if i.strip()]
+        if not ids:
+            return APIResponse.error('Pass ?ids=<comma-separated document ids>.')
+
+        return APIResponse.success(
+            data=document_service.processing_status(request.user.id, ids)
+        )
+
+
+class DocumentReprocessView(APIView):
+    """Re-run ingestion for a document, e.g. after a failure."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_scope = 'upload'
+
+    def post(self, request, document_id):
+        try:
+            task_id = document_service.reprocess_document(request.user.id, document_id)
+        except DocumentError as exc:
+            return APIResponse.not_found(str(exc))
+
+        return APIResponse.success(
+            data={'document_id': document_id, 'task_id': task_id},
+            message='Document queued for reprocessing.',
+        )
+
+
 class DocumentSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 

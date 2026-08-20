@@ -194,6 +194,10 @@ CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default=REDIS_URL)
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_ACCEPT_CONTENT = ['json']
+# Celery 6 stops honouring broker_connection_retry at startup unless this is
+# set. Retrying matters here: the worker container reaches Redis by service
+# name and routinely starts a moment before Redis is accepting connections.
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_TIMEZONE = 'UTC'
 CELERY_ENABLE_UTC = True
 
@@ -218,6 +222,21 @@ CELERY_TASK_SOFT_TIME_LIMIT = config('CELERY_TASK_SOFT_TIME_LIMIT', default=1680
 # locally when you don't want to run a worker.
 CELERY_TASK_ALWAYS_EAGER = config('CELERY_TASK_ALWAYS_EAGER', default=False, cast=bool)
 CELERY_TASK_EAGER_PROPAGATES = True
+
+# --- Periodic jobs (celery beat) ---
+CELERY_BEAT_SCHEDULE = {
+    # A document whose worker died before the job could be redelivered stays at
+    # "processing" forever, and the upload screen polls it showing a spinner
+    # that will never stop. This turns that into an honest failure the user can
+    # act on. Hourly is often enough: the window it closes is measured in the
+    # time someone is willing to stare at a progress bar.
+    'sweep-stuck-documents': {
+        'task': 'documents.sweep_stuck_documents',
+        'schedule': config('SWEEP_INTERVAL_SECONDS', default=900, cast=int),
+        'kwargs': {'older_than_minutes': config('STUCK_AFTER_MINUTES',
+                                                default=60, cast=int)},
+    },
+}
 
 # ═══════════════════════════════════════════════════════════════
 # PASSWORD VALIDATION

@@ -1,160 +1,220 @@
-"""
-Module 7: Document Processing — what happens after a file is uploaded.
+"""Document ingestion — what happens after a file is uploaded.
 
     file -> extract text (per page)
          -> split into overlapping chunks
-         -> embed each chunk into a 384-d vector
-         -> save chunks to MongoDB + vectors to a FAISS index
+         -> embed each chunk
+         -> store chunks and vectors
 
-Runs in a background thread, so the upload request returns immediately and the
-UI polls the document's status. ML imports are done inside the function so the
-server can start even before the heavy packages are loaded.
+Runs on a Celery worker (see apps/documents/tasks.py), so nothing here may
+assume a request, a user session, or that it is the only copy running.
+
+**Idempotent by construction.** A worker killed mid-document has its task
+redelivered, so this must be safe to re-run: existing chunks and the vector
+index are dropped before new ones are written, never appended to. Running it
+twice produces the same result as running it once, which is the property that
+makes ``acks_late`` safe.
+
+ML imports stay inside the functions so the module can be imported — by the
+web process, by a test, by ``manage.py`` — without loading numpy, FAISS or a
+tokenizer.
 """
 import logging
 import time
+from typing import Any, Optional
 
-from bson import Binary, ObjectId
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-
-def _mark(document_id: ObjectId, **fields) -> None:
-    """Update a document record, always refreshing `updated_at`."""
-    from core.mongo import documents_col
-
-    documents_col().update_one(
-        {'_id': document_id},
-        {'$set': {**fields, 'updated_at': timezone.now()}},
-    )
+# The placeholder text_extractor leaves for a page it could not read.
+OCR_PLACEHOLDER_PREFIX = '[Page '
 
 
-def _add_summary(document_id: ObjectId, pages: list) -> None:
-    """Generate the AI summary and store it.
-
-    Deliberately runs *after* the document is marked completed: it is a blocking
-    LLM call, and the user should be able to start chatting without waiting for
-    it. Fully guarded so a summary failure can never fail an indexed document.
-    """
-    from services.llm import generate_document_summary
-
-    try:
-        summary = generate_document_summary(pages)
-    except Exception as exc:
-        logger.warning("Summary generation failed: %s", exc)
-        summary = "Summary could not be generated."
-
-    try:
-        _mark(document_id, summary=summary)
-    except Exception as exc:
-        logger.warning("Could not store the summary: %s", exc)
+class ProcessingError(Exception):
+    """Ingestion failed for a reason worth showing the user."""
 
 
-def process_document(document_id: str, user_id: int, file_path: str, file_type: str) -> None:
-    """Extract -> chunk -> embed -> index one uploaded document.
+def _repository():
+    from repositories.factory import get_document_repository
 
-    Safe to re-run: existing chunks and the FAISS index are dropped first, so
-    the embeddings are always rebuilt fresh rather than duplicated.
+    return get_document_repository()
+
+
+def _mark(document_id: str, user_id: int, **fields: Any) -> None:
+    _repository().update(document_id, user_id, **fields)
+
+
+def process_document(document_id: str, user_id: int, file_path: str,
+                     file_type: str) -> dict[str, Any]:
+    """Extract, chunk, embed and index one uploaded document.
+
+    Returns a small summary of what was produced, which the task records.
+    Raises on failure after marking the document failed, so Celery sees the
+    error and can retry.
     """
     from core.constants import STATUS_COMPLETED, STATUS_FAILED, STATUS_PROCESSING
-    from core.mongo import chunks_col, documents_col
     from services.chunker import chunk_pages
     from services.embeddings import embed_chunks
-    from services.faiss_store import delete_index, save_index
     from services.text_extractor import extract_text, get_word_count
 
-    doc_oid = ObjectId(document_id)
+    repository = _repository()
     started = time.perf_counter()
 
-    try:
-        doc = documents_col().find_one({'_id': doc_oid}, {'original_filename': 1})
-        filename = (doc or {}).get('original_filename', '')
-        _mark(doc_oid, status=STATUS_PROCESSING)
+    document = repository.get(document_id, user_id)
+    if document is None:
+        # The document was deleted between the upload and the worker picking
+        # the job up. Not an error worth retrying — there is nothing to process.
+        logger.warning('Document %s no longer exists; skipping.', document_id)
+        return {'skipped': 'document no longer exists'}
 
-        # Clear anything left from a previous run of this same document.
-        chunks_col().delete_many({'document_id': document_id})
-        delete_index(user_id, document_id)
+    filename = document.get('original_filename', '')
+
+    try:
+        _mark(document_id, user_id,
+              status=STATUS_PROCESSING,
+              processing_started_at=timezone.now(),
+              error_message='')
+
+        # Anything left from a previous run of this same document. Dropping
+        # first is what makes a redelivered task produce one set of chunks
+        # rather than two.
+        repository.delete_chunks(document_id, user_id)
+        _delete_vector_index(user_id, document)
 
         # --- 1. Text, one entry per page ---
         pages = extract_text(file_path, file_type)
         if not pages:
-            raise ValueError(
-                "No text could be extracted from this document. "
-                "The file may be corrupted, empty, or in an unsupported format."
+            raise ProcessingError(
+                'No text could be extracted from this document. The file may be '
+                'corrupted, empty, or in an unsupported format.'
             )
 
-        # OCR leaves a "[Page 4: Image-based content...]" placeholder for pages it
-        # could not read. Those carry no meaning, so they are excluded from the
-        # index — unless that is all we have, in which case the document is kept
-        # anyway rather than failing the upload outright.
-        real_pages = [p for p in pages if not p['content'].startswith('[Page ')]
-        if not real_pages:
-            logger.warning("%s: no readable text found — indexing placeholders.", filename)
-            real_pages = pages
+        # OCR leaves a placeholder for pages it could not read. Those carry no
+        # meaning, so they are kept out of the index — unless they are all there
+        # is, in which case the document is kept anyway rather than failing an
+        # upload the user watched succeed.
+        readable = [p for p in pages if not p['content'].startswith(OCR_PLACEHOLDER_PREFIX)]
+        if not readable:
+            logger.warning('%s: no readable text found — indexing placeholders.', filename)
+            readable = pages
 
         # --- 2. Chunks ---
-        chunks = chunk_pages(real_pages)
+        chunks = chunk_pages(readable)
         if not chunks:
-            raise ValueError("Chunking produced no results.")
+            raise ProcessingError('Chunking produced no results.')
 
-        logger.info("%s: %d chunks, embedding…", filename or document_id, len(chunks))
+        logger.info('%s: %d chunks, embedding…', filename or document_id, len(chunks))
 
         # --- 3. Vectors ---
         embeddings = embed_chunks(chunks)
-        logger.info("%s: embedded %d chunks, indexing…", filename or document_id, len(chunks))
+        logger.info('%s: embedded %d chunks, storing…', filename or document_id, len(chunks))
 
-        # --- 4. Store: chunk text in MongoDB, vectors in FAISS ---
-        # Each chunk keeps its page_number — that is what lets an answer cite
-        # "(Page 12)" later on.
-        #
-        # The vector is stored here too, not only in the FAISS index. The index
-        # is a file, and on a host without a persistent disk it does not survive
-        # a restart; MongoDB does. Keeping the vector means a lost index is
-        # rebuilt by copying these back (see faiss_store.rebuild_index) instead
-        # of re-embedding every chunk — which on a throttled free instance takes
-        # minutes for a large document and would blow the request timeout.
-        # Cost is 384 float32s = 1.5 KB per chunk, so ~150 KB for a 50-page PDF.
-        now = timezone.now()
-        inserted = chunks_col().insert_many([
-            {
-                'document_id': document_id,
-                'user_id':     user_id,
-                'filename':    filename,
-                'content':     chunk['content'],
-                'chunk_index': chunk['chunk_index'],
-                'page_number': chunk['page_number'],
-                'start_char':  chunk['start_char'],
-                'end_char':    chunk['end_char'],
-                'word_count':  chunk['word_count'],
-                'embedding':   Binary(vector.tobytes()),
-                'created_at':  now,
-            }
-            for chunk, vector in zip(chunks, embeddings, strict=False)
-        ])
-        chunk_ids = [str(oid) for oid in inserted.inserted_ids]
-        save_index(user_id, document_id, embeddings, chunk_ids)
+        # --- 4. Store ---
+        for chunk, vector in zip(chunks, embeddings, strict=True):
+            chunk['embedding'] = vector
+            chunk['filename'] = filename
+
+        chunk_ids = repository.replace_chunks(document_id, user_id, chunks)
+        _save_vector_index(user_id, document, embeddings, chunk_ids)
 
         # --- 5. Ready to chat with ---
-        word_count = get_word_count(real_pages)
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        word_count = get_word_count(readable)
+
         _mark(
-            doc_oid,
+            document_id, user_id,
             status=STATUS_COMPLETED,
             page_count=len(pages),
             word_count=word_count,
             chunk_count=len(chunks),
             vector_count=len(chunk_ids),
-            summary='Generating summary…',
+            processing_completed_at=timezone.now(),
+            processing_duration_ms=elapsed_ms,
             error_message='',
         )
         logger.info(
-            "Indexed %s in %.1fs: %d pages, %d chunks, %d words",
-            filename or document_id, time.perf_counter() - started,
+            'Indexed %s in %.1fs: %d pages, %d chunks, %d words',
+            filename or document_id, elapsed_ms / 1000,
             len(pages), len(chunks), word_count,
         )
 
-        _add_summary(doc_oid, real_pages)
+        return {
+            'document_id': document_id,
+            'pages': len(pages),
+            'chunks': len(chunks),
+            'words': word_count,
+            'duration_ms': elapsed_ms,
+        }
 
     except Exception as exc:
-        logger.error("Processing failed for %s: %s", document_id, exc, exc_info=True)
-        _mark(doc_oid, status=STATUS_FAILED, error_message=str(exc))
+        logger.error('Processing failed for %s: %s', document_id, exc, exc_info=True)
+        _mark(
+            document_id, user_id,
+            status=STATUS_FAILED,
+            error_message=str(exc)[:2000],
+            processing_completed_at=timezone.now(),
+            processing_duration_ms=round((time.perf_counter() - started) * 1000),
+        )
         raise
+
+
+def generate_summary(document_id: str, user_id: int) -> Optional[str]:
+    """Produce and store the document's AI summary.
+
+    Separate from ingestion on purpose. It is a blocking LLM call that the user
+    does not have to wait for — the document is chat-ready without it — and it
+    fails for entirely different reasons (rate limits, a retired model) than
+    text extraction does. Keeping it apart means a summary failure cannot mark
+    a perfectly indexed document as failed, and it can be retried on its own.
+    """
+    from services.llm import generate_document_summary
+    from services.text_extractor import extract_text
+
+    repository = _repository()
+    document = repository.get(document_id, user_id)
+    if document is None:
+        return None
+
+    try:
+        pages = extract_text(document['file_path'], document['file_type'])
+        summary = generate_document_summary(pages)
+    except Exception as exc:
+        logger.warning('Summary generation failed for %s: %s', document_id, exc)
+        raise
+
+    repository.update(document_id, user_id, summary=summary)
+    return summary
+
+
+# ══════════════════════════════════════════════════════════════════
+# Vector index
+# ══════════════════════════════════════════════════════════════════
+
+def _index_key(document: dict[str, Any]) -> str:
+    """The name this document's FAISS index is stored under."""
+    return document.get('legacy_mongo_id') or document['id']
+
+
+def _save_vector_index(user_id: int, document: dict[str, Any],
+                       embeddings, chunk_ids: list[str]) -> None:
+    from django.conf import settings
+
+    if settings.VECTOR_BACKEND != 'faiss':
+        # pgvector stores each vector on its chunk row, which replace_chunks
+        # has already written. Nothing else to do.
+        return
+
+    from services.faiss_store import save_index
+
+    save_index(user_id, _index_key(document), embeddings, chunk_ids)
+
+
+def _delete_vector_index(user_id: int, document: dict[str, Any]) -> None:
+    from django.conf import settings
+
+    if settings.VECTOR_BACKEND != 'faiss':
+        return
+
+    from services.faiss_store import delete_index
+
+    delete_index(user_id, _index_key(document))
