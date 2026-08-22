@@ -32,9 +32,19 @@ COPY requirements.txt requirements-prod.txt ./
 FROM base AS development
 
 COPY requirements-dev.txt ./
-# requirements.txt rather than -prod: the dev image keeps sentence-transformers
-# so EMBEDDING_BACKEND=torch can be exercised, and adds the test tooling.
-RUN pip install -r requirements.txt -r requirements-dev.txt
+# requirements-prod rather than the full requirements.txt, plus the test tooling.
+#
+# The full file pulls PyTorch through sentence-transformers — around 800 MB,
+# which turned the documented `docker compose up --build` quick-start into a
+# very long first run for a dependency nothing in the default configuration
+# uses. The ONNX embedding backend is what actually runs, and reranking (the
+# only feature that needs PyTorch) is off by default.
+#
+# To exercise reranking or EMBEDDING_BACKEND=torch in a container:
+#   docker compose build --build-arg INSTALL_TORCH=1 api
+ARG INSTALL_TORCH=0
+RUN pip install -r requirements-prod.txt -r requirements-dev.txt \
+    && if [ "$INSTALL_TORCH" = "1" ]; then pip install sentence-transformers==3.1.1; fi
 
 COPY . .
 
