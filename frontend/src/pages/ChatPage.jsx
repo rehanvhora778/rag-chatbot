@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-import { chatAPI } from '../api/chat'
+import { chatAPI, streamMessage } from '../api/chat'
 import { documentsAPI } from '../api/documents'
 import Modal from '../components/common/Modal'
 import AnimatedButton from '../components/ui/AnimatedButton'
@@ -325,46 +325,92 @@ export default function ChatPage() {
     }
   }
 
-  const sendMessage = async () => {
+  // Replace the last message in the list. Every streaming update targets the
+  // assistant placeholder appended below, and doing it through the updater
+  // form means rapid token events cannot read a stale array.
+  const patchLastMessage = (patch) =>
+    setMessages(m => {
+      if (!m.length) return m
+      const last = m[m.length - 1]
+      return [...m.slice(0, -1), { ...last, ...(typeof patch === 'function' ? patch(last) : patch) }]
+    })
+
+  const sendMessage = () => {
     const q = question.trim()
     if (!q || sending || !sessionId) return
 
     setQuestion('')
     setSending(true)
-    setMessages(m => [...m, { role: 'user', content: q, created_at: new Date().toISOString(), sources: [] }])
 
-    const controller = new AbortController()
-    abortRef.current = controller
+    // The question and an empty assistant bubble go in together. The bubble is
+    // what tokens are appended to, so it has to exist before the first one
+    // arrives — otherwise the first fragment has nowhere to land.
+    setMessages(m => [
+      ...m,
+      { role: 'user', content: q, created_at: new Date().toISOString(), sources: [] },
+      { role: 'assistant', content: '', sources: [], created_at: new Date().toISOString(), _streaming: true },
+    ])
 
-    try {
-      const res = await chatAPI.sendMessage(sessionId, { question: q }, { signal: controller.signal })
-      const { answer, citations } = res.data.data
-      setMessages(m => [...m, {
-        role: 'assistant',
-        content: answer,
-        sources: citations || [],
-        created_at: new Date().toISOString(),
-        _animate: true,
-      }])
-      loadSessions()
-      notifySessionsChanged()
-    } catch (err) {
-      const msg = friendlyError(err, 'The assistant could not answer that. Please try again.')
-      if (msg) {
-        toast.error(msg)
-        // Drop the optimistic question so the transcript doesn't show an
-        // unanswered message the server never stored.
-        setMessages(m => m.slice(0, -1))
-      } else {
-        // Cancelled by the user — the pipeline may still have persisted the
-        // exchange, so reload rather than guess.
+    let failed = false
+
+    const abort = streamMessage(sessionId, q, (event) => {
+      switch (event.type) {
+        case 'sources':
+          // Citations arrive before the first token, so Sources render while
+          // the answer is still being written instead of appearing at the end.
+          patchLastMessage({ sources: event.citations || [] })
+          break
+
+        case 'token':
+          patchLastMessage(prev => ({ content: prev.content + event.text }))
+          break
+
+        case 'security':
+          // A document contains what looks like an embedded instruction. The
+          // answer is still shown — the passage was neutralised server-side —
+          // but the user should know their file contains it.
+          toast('A source document contains text that looks like an embedded instruction. It was ignored.', {
+            icon: '⚠️', duration: 6000,
+          })
+          break
+
+        case 'done':
+          // The message id only exists once the turn is saved, and feedback
+          // needs it to attach to this specific answer.
+          patchLastMessage({ id: event.message_id, _streaming: false })
+          abortRef.current = null
+          setSending(false)
+          loadSessions()
+          notifySessionsChanged()
+          break
+
+        case 'error':
+          failed = true
+          toast.error(event.message || 'The assistant could not answer that. Please try again.')
+          // Drop both the placeholder and the question: the server did not
+          // store this exchange, so leaving it would show a transcript that
+          // does not survive a refresh.
+          setMessages(m => m.slice(0, -2))
+          abortRef.current = null
+          setSending(false)
+          break
+
+        default:
+          break
+      }
+    })
+
+    abortRef.current = {
+      abort: () => {
+        abort()
+        if (failed) return
+        // Stopped mid-answer. The server may already have persisted the turn,
+        // so reload rather than guess at what was saved.
+        setSending(false)
         chatAPI.getSession(sessionId)
           .then(r => setMessages(r.data.data.messages || []))
-          .catch(() => setMessages(m => m.slice(0, -1)))
-      }
-    } finally {
-      abortRef.current = null
-      setSending(false)
+          .catch(() => setMessages(m => m.slice(0, -2)))
+      },
     }
   }
 
