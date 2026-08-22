@@ -138,17 +138,30 @@ python manage.py evaluate_rag --compare
 Everything is environment-driven; see [`backend/.env.example`](backend/.env.example)
 for the annotated list. The switches that change behaviour most:
 
+**The defaults follow `DATABASE_URL`.** Set it and you get the full stack; leave
+it unset and the project runs exactly as it originally did.
+
+| | `DATABASE_URL` unset | `DATABASE_URL` set |
+|---|---|---|
+| `PERSISTENCE_BACKEND` | `mongo` | `postgres` |
+| `VECTOR_BACKEND` | `faiss` | `pgvector` |
+| `RAG_HYBRID_ENABLED` | `False` | `True` |
+| `RAG_TOP_K` | `4` | `4` |
+
+Deriving rather than asserting is deliberate: defaulting to `postgres` outright
+made a fresh clone fail its own startup check for a reason having nothing to do
+with anything the user did.
+
+Two switches stay off because they cost something:
+
 | Setting | Default | |
 |---|---|---|
-| `PERSISTENCE_BACKEND` | `mongo` | `mongo` \| `postgres` |
-| `VECTOR_BACKEND` | `faiss` | `faiss` \| `pgvector` |
-| `RAG_HYBRID_ENABLED` | `False` | needs `postgres` + `pgvector` |
-| `RAG_RERANK_ENABLED` | `False` | needs the PyTorch stack |
-| `RAG_QUERY_REWRITE` | `False` | one extra LLM call per follow-up |
+| `RAG_RERANK_ENABLED` | `False` | needs the PyTorch stack, excluded from `requirements-prod.txt` |
+| `RAG_QUERY_REWRITE` | `False` | one extra LLM call per follow-up question |
 
-The MongoDB and FAISS defaults are the project's original storage. Both
-implementations are live and covered by the same test suite, which is what made
-migrating to PostgreSQL possible without downtime. To move across:
+MongoDB and FAISS remain fully implemented and covered by the same parity test
+suite, which is what made migrating to PostgreSQL possible without downtime —
+and what makes the switch a rollback rather than a rewrite. To move across:
 
 ```bash
 python manage.py migrate_from_mongo --dry-run --users-from-sqlite db.sqlite3
@@ -195,5 +208,6 @@ Stated plainly, because a README that lists only strengths is not useful.
   claim the project cannot back up.
 - **The admin analytics dashboard is an API, not a UI.**
   `GET /api/admin-panel/metrics/` returns the data; nothing renders it yet.
-- **Hybrid retrieval ships off by default** because it requires PostgreSQL. The
-  gains above are real but are not what a fresh clone runs.
+- **A clone with no `DATABASE_URL` runs the original stack** — SQLite, MongoDB
+  and FAISS, with hybrid retrieval off. That path is fully supported and tested,
+  but the measured gains above need PostgreSQL.
