@@ -299,3 +299,25 @@ class AdminChatSessionListView(APIView):
         chat_sessions_col().delete_one({'_id': oid})
         messages_col().delete_many({'session_id': session_id})
         return APIResponse.success(message='Chat session deleted.')
+
+
+class AdminMetricsView(APIView):
+    """Operational metrics: latency, tokens, feedback, ingestion health.
+
+    GET /api/admin-panel/metrics/?days=7
+
+    Separate from AdminSystemStatsView, which counts rows. This answers the
+    operational questions — how fast, at what cost, and is anything failing.
+    """
+
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    def get(self, request):
+        from apps.analytics import metrics_service
+
+        try:
+            days = max(1, min(int(request.query_params.get('days', 7)), 90))
+        except (TypeError, ValueError):
+            days = 7
+
+        return APIResponse.success(data=metrics_service.collect(days))

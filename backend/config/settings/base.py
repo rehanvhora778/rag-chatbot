@@ -64,6 +64,9 @@ INSTALLED_APPS = [
 # ═══════════════════════════════════════════════════════════════
 
 MIDDLEWARE = [
+    # First, so every log line emitted while handling a request — including
+    # ones from middleware below it — carries the request id.
+    'core.observability.RequestContextMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -538,7 +541,10 @@ LOGGING = {
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '[{asctime}] [{levelname}] [{name}] {message}',
+            # request_id ties every line of one request together; user_id says
+            # whose it was. Both come from core.observability's filter and are
+            # '-' for work with no request (a command, a beat job).
+            'format': '[{asctime}] [{levelname}] [{name}] [req={request_id} user={user_id}] {message}',
             'style': '{',
             'datefmt': '%Y-%m-%d %H:%M:%S',
         },
@@ -547,10 +553,16 @@ LOGGING = {
             'style': '{',
         },
     },
+    'filters': {
+        'request_context': {
+            '()': 'core.observability.RequestContextFilter',
+        },
+    },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
             'formatter': 'simple',
+            'filters': ['request_context'],
         },
         'app_file': {
             'class': 'logging.handlers.RotatingFileHandler',
@@ -558,6 +570,7 @@ LOGGING = {
             'maxBytes': 10 * 1024 * 1024,
             'backupCount': 5,
             'formatter': 'verbose',
+            'filters': ['request_context'],
         },
         'error_file': {
             'class': 'logging.handlers.RotatingFileHandler',
@@ -565,6 +578,7 @@ LOGGING = {
             'maxBytes': 10 * 1024 * 1024,
             'backupCount': 5,
             'formatter': 'verbose',
+            'filters': ['request_context'],
             'level': 'ERROR',
         },
     },
