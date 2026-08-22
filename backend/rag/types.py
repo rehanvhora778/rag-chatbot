@@ -87,16 +87,6 @@ def chunks_to_documents(chunks: Iterable[dict[str, Any]]) -> list[Document]:
     return [chunk_to_document(c) for c in chunks]
 
 
-def score_of(document: Document) -> float:
-    return float((document.metadata or {}).get(SCORE, 0.0))
-
-
-def page_key(document: Document) -> tuple[str, int]:
-    """The (document, page) pair a citation is deduplicated on."""
-    meta = document.metadata or {}
-    return meta.get(DOCUMENT_ID, ''), int(meta.get(PAGE_NUMBER, 0))
-
-
 def identity(document: Document) -> str:
     """A stable key for one passage, for fusing result lists.
 

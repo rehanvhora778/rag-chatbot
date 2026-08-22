@@ -7,8 +7,13 @@ that ties them together — so reconstructing what happened means grepping by
 timestamp and hoping the instance was quiet.
 
 A request id fixes that. It is generated once per request, attached to every log
-record emitted while handling it, returned to the client in a response header,
-and passed to any task the request queues. One id, one grep, the whole story.
+record emitted while handling it, and returned to the client in a response
+header. One id, one grep, for everything that happened inside the request.
+
+It does *not* currently follow work into a Celery task — the task runs in
+another process where the ContextVar is empty, so the id would have to be passed
+as an argument and threaded through. Worth doing; not done, and said here rather
+than implied by a helper nothing calls.
 
 It is stored in a ``ContextVar`` rather than on the request object, because the
 code that needs to log is several layers below the view and threading a request
@@ -40,14 +45,6 @@ MAX_INCOMING_LENGTH = 64
 
 def get_request_id() -> str:
     return _request_id.get()
-
-
-def set_request_id(value: str) -> None:
-    _request_id.set(value or '')
-
-
-def get_user_id() -> str:
-    return _user_id.get()
 
 
 def new_request_id() -> str:
@@ -130,19 +127,6 @@ class RequestContextMiddleware(MiddlewareMixin):
             request.method, request.path, exception, exc_info=True,
         )
         return None
-
-
-def with_request_id(task_kwargs: dict) -> dict:
-    """Attach the current request id to a task's kwargs.
-
-    A document queued by an upload should be traceable back to the request that
-    queued it. Passed explicitly because a Celery task runs in a different
-    process, where the ContextVar is empty.
-    """
-    request_id = get_request_id()
-    if request_id:
-        return {**task_kwargs, 'request_id': request_id}
-    return task_kwargs
 
 
 class timed:

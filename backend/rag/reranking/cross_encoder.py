@@ -124,9 +124,3 @@ class CrossEncoderReranker:
         return reranked
 
 
-def reset_model() -> None:
-    """Drop the cached model. For tests."""
-    global _model, _load_failed
-    with _model_lock:
-        _model = None
-        _load_failed = False

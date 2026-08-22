@@ -172,18 +172,6 @@ def _is_plausible(rewritten: str, original: str) -> bool:
     return True
 
 
-def expand_query(question: str) -> list[str]:
-    """Alternative phrasings to search alongside the original.
-
-    Not implemented, and listed here so the absence is a decision rather than
-    an oversight. Multi-query expansion means one LLM call plus one retrieval
-    per variant; with reranking already narrowing a wide candidate pool, the
-    measured gain did not justify tripling retrieval latency on a free-tier
-    provider that is already the slowest part of a turn.
-    """
-    return [question]
-
-
 def preprocess(question: str) -> str:
     """Normalise a question before it is embedded.
 

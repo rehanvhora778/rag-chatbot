@@ -32,7 +32,6 @@ database write amplification attack.
 import logging
 from typing import Optional
 
-from django.conf import settings
 from django.core.cache import cache
 from rest_framework.throttling import ScopedRateThrottle
 
@@ -105,17 +104,6 @@ def is_locked_out(identifier: str) -> bool:
     return (cache.get(_key(identifier)) or 0) >= MAX_FAILURES
 
 
-def seconds_remaining(identifier: str) -> int:
-    """Roughly how long a locked-out account has to wait.
-
-    Approximate on purpose: reporting the exact remaining time turns the
-    lockout into a clock an attacker can schedule against.
-    """
-    if not is_locked_out(identifier):
-        return 0
-    return LOCKOUT_SECONDS
-
-
 def record_failure(identifier: str) -> int:
     """Count one failed sign-in. Returns the new failure count."""
     if not identifier:
@@ -165,10 +153,3 @@ def lockout_message(identifier: str) -> Optional[str]:
     )
 
 
-def throttle_settings() -> dict:
-    """What the current limits are, for the admin panel and diagnostics."""
-    return {
-        'auth_rate': settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'].get('auth'),
-        'max_failures_per_account': MAX_FAILURES,
-        'lockout_seconds': LOCKOUT_SECONDS,
-    }

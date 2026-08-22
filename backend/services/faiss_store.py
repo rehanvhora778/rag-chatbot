@@ -13,7 +13,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -234,36 +234,3 @@ def _mmr_select(candidates, k: int, lambda_mult: float):
     return selected
 
 
-def search_multiple_indexes(
-    user_id,
-    document_ids: List[str],
-    query_embedding,
-    top_k: int = None,
-    fetch_k: int = None,
-    use_mmr: bool = None,
-    lambda_mult: float = None,
-) -> List[Tuple[str, float]]:
-    """Retrieve the best `top_k` chunks across all of a session's documents.
-
-    Pulls a wider `fetch_k` candidate pool first, then (optionally) applies MMR
-    to pick a relevant *and* diverse final set.
-    """
-    from django.conf import settings
-
-    top_k       = top_k       or settings.RAG_TOP_K
-    fetch_k     = fetch_k     or settings.RAG_FETCH_K
-    use_mmr     = settings.RAG_USE_MMR if use_mmr is None else use_mmr
-    lambda_mult = settings.RAG_MMR_LAMBDA if lambda_mult is None else lambda_mult
-
-    candidates = []
-    for doc_id in document_ids:
-        candidates.extend(_fetch_candidates(user_id, doc_id, query_embedding, fetch_k))
-
-    if not candidates:
-        return []
-
-    candidates.sort(key=lambda x: x[1], reverse=True)
-
-    if use_mmr:
-        return _mmr_select(candidates, top_k, lambda_mult)
-    return [(cid, score) for cid, score, _ in candidates[:top_k]]

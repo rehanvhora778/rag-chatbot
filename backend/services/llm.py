@@ -82,8 +82,3 @@ def read_image(image_b64: str, prompt: str, mime_type: str = 'image/png',
     return provider.read_image(image_b64, prompt, mime_type, max_tokens)
 
 
-def get_groq_client():
-    """Deprecated: reach the provider through rag.registry.get_llm()."""
-    from rag.registry import get_llm
-
-    return get_llm()._get_client()

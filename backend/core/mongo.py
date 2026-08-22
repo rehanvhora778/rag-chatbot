@@ -63,9 +63,6 @@ def messages_col() -> Collection:
 def analytics_col() -> Collection:
     return get_collection(settings.MONGO_COLLECTIONS['ANALYTICS'])
 
-def summaries_col() -> Collection:
-    return get_collection(settings.MONGO_COLLECTIONS['DOCUMENT_SUMMARIES'])
-
 def otps_col() -> Collection:
     return get_collection(settings.MONGO_COLLECTIONS['OTPS'])
 

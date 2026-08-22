@@ -142,7 +142,3 @@ def _trim_history(history: list[dict[str, Any]],
     return trimmed
 
 
-# The old name, kept so `manage.py test_rag` and any other caller keep working.
-def run_rag_query(user_id: int, session_id: str, document_ids: list[str],
-                  question: str) -> dict[str, Any]:
-    return answer_question(user_id, session_id, document_ids, question)

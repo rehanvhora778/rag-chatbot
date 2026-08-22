@@ -45,14 +45,3 @@ class Reranker(Protocol):
         ...
 
 
-class NoOpReranker:
-    """Used when reranking is switched off. Truncates, reorders nothing."""
-
-    name = 'none'
-
-    def available(self) -> bool:
-        return True
-
-    def rerank(self, query: str, documents: list[Document],
-               top_k: int) -> list[Document]:
-        return documents[:top_k]

@@ -38,13 +38,6 @@ def list_conversations(user_id: int, page: int = 1, page_size: int = 20):
     )
 
 
-def get_conversation(user_id: int, conversation_id: str) -> dict[str, Any]:
-    conversation = get_conversation_repository().get(conversation_id, user_id)
-    if conversation is None:
-        raise ConversationNotFound('Session not found.')
-    return conversation
-
-
 def get_transcript(user_id: int, conversation_id: str) -> dict[str, Any]:
     repository = get_conversation_repository()
     conversation = repository.get(conversation_id, user_id)

@@ -167,7 +167,6 @@ MONGO_COLLECTIONS = {
     'CHAT_SESSIONS':      'chat_sessions',
     'MESSAGES':           'messages',
     'ANALYTICS':          'analytics',
-    'DOCUMENT_SUMMARIES': 'document_summaries',
     'OTPS':               'otps',
     'FEEDBACK':           'feedback',
 }
