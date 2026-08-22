@@ -47,11 +47,19 @@ SECURE_HSTS_PRELOAD            = True
 # and any redirect-to-HTTPS would loop forever.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-# Off by default: Render already redirects HTTP to HTTPS at the edge, so turning
-# this on adds nothing there but does add a way for a proxy that forwards the
-# header incorrectly to produce an infinite redirect. Turn it on when Django is
-# the first thing the client actually reaches.
-SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
+# On by default. This was False initially, on the reasoning that Render already
+# redirects at the edge so Django doing it again adds nothing — but that
+# reasoning had it backwards. A default should fail closed: the cost of it being
+# on where it is redundant is one wasted redirect, while the cost of it being
+# off where nothing else redirects is that the whole API answers over plain
+# HTTP. Django's own deployment check flags the False case as a warning, and it
+# is right to.
+#
+# SECURE_PROXY_SSL_HEADER above is what makes this safe behind a TLS-terminating
+# proxy: without it Django would consider every forwarded request insecure and
+# redirect forever. Set this to False only for a proxy that does not send
+# X-Forwarded-Proto.
+SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=True, cast=bool)
 
 # ═══════════════════════════════════════════════════════════════
 # COOKIES
