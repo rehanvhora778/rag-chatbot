@@ -187,6 +187,25 @@ class ConversationRepository(Protocol):
     def recent_history(self, conversation_id: str, user_id: int,
                        max_turns: int) -> list[MessageDTO]: ...
 
+    def save_feedback(self, message_id: str, user_id: int, rating: int,
+                      reason: str = '', comment: str = '') -> Optional[dict[str, Any]]:
+        """Record a verdict on one assistant answer.
+
+        Returns None when the message does not exist, is not an assistant
+        message, or belongs to someone else — the three cases a caller must not
+        be able to tell apart.
+
+        One verdict per message: rating again replaces the previous one rather
+        than stacking a second. A user changing their mind should correct the
+        record, not add to it, or the negative-feedback queue fills with
+        superseded opinions.
+        """
+        ...
+
+    def get_feedback(self, message_id: str, user_id: int) -> Optional[dict[str, Any]]:
+        """This user's verdict on a message, if they left one."""
+        ...
+
     def rename_document_everywhere(self, user_id: int, document_id: str,
                                    new_name: str) -> int:
         """Keep the denormalised document names on conversations in step with a

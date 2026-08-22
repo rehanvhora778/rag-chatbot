@@ -159,6 +159,7 @@ MONGO_COLLECTIONS = {
     'ANALYTICS':          'analytics',
     'DOCUMENT_SUMMARIES': 'document_summaries',
     'OTPS':               'otps',
+    'FEEDBACK':           'feedback',
 }
 
 # ═══════════════════════════════════════════════════════════════

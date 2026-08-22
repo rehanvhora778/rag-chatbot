@@ -69,6 +69,9 @@ def summaries_col() -> Collection:
 def otps_col() -> Collection:
     return get_collection(settings.MONGO_COLLECTIONS['OTPS'])
 
+def feedback_col() -> Collection:
+    return get_collection(settings.MONGO_COLLECTIONS['FEEDBACK'])
+
 
 def create_indexes() -> None:
     """Create all MongoDB indexes. Safe to call repeatedly."""
@@ -87,6 +90,10 @@ def create_indexes() -> None:
         messages_col().create_index([('session_id', ASCENDING)])
         messages_col().create_index([('created_at', ASCENDING)])
         messages_col().create_index([('content', 'text')])
+
+        # One verdict per message: rating again updates rather than stacking.
+        feedback_col().create_index([('message_id', ASCENDING)], unique=True)
+        feedback_col().create_index([('rating', ASCENDING), ('created_at', DESCENDING)])
 
         analytics_col().create_index([('user_id', ASCENDING)])
         analytics_col().create_index([('created_at', DESCENDING)])

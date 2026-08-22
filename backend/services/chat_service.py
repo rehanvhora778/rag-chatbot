@@ -5,12 +5,12 @@ and analytics in one method. Those are separable concerns with different
 failure modes, and only one of them is about HTTP.
 """
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from django.conf import settings
 
 from core.analytics import record_event
-from core.constants import EVENT_EXPORT, EVENT_QUERY, SESSION_ARCHIVED
+from core.constants import EVENT_EXPORT, EVENT_FEEDBACK, EVENT_QUERY, SESSION_ARCHIVED
 from repositories.factory import get_conversation_repository, get_document_repository
 
 logger = logging.getLogger(__name__)
@@ -204,3 +204,72 @@ def get_engine_config() -> dict[str, Any]:
             'rerank_enabled': settings.RAG_RERANK_ENABLED,
         },
     }
+
+
+# ══════════════════════════════════════════════════════════════════
+# Feedback
+# ══════════════════════════════════════════════════════════════════
+
+VALID_RATINGS = (-1, 1)
+NEGATIVE_REASONS = ('incorrect', 'irrelevant', 'missing', 'hallucination', 'other')
+MAX_COMMENT_CHARS = 2000
+
+
+def submit_feedback(user_id: int, message_id: str, rating: int,
+                    reason: str = '', comment: str = '') -> dict[str, Any]:
+    """Record a thumbs up or down on one answer."""
+    if rating not in VALID_RATINGS:
+        raise ChatError('Rating must be 1 (helpful) or -1 (not helpful).')
+
+    reason = (reason or '').strip().lower()
+    if reason and reason not in NEGATIVE_REASONS:
+        raise ChatError(f'Unknown reason. One of: {", ".join(NEGATIVE_REASONS)}.')
+
+    # A reason on a positive rating is meaningless — every option describes a
+    # way the answer was wrong — and would pollute the queue of things to fix.
+    if rating == 1:
+        reason = ''
+
+    record = get_conversation_repository().save_feedback(
+        message_id, user_id,
+        rating=rating,
+        reason=reason,
+        comment=(comment or '').strip()[:MAX_COMMENT_CHARS],
+    )
+    if record is None:
+        raise ConversationNotFound('Message not found.')
+
+    record_event(user_id, EVENT_FEEDBACK, {
+        'message_id': message_id, 'rating': rating, 'reason': reason,
+    })
+    return record
+
+
+def get_feedback(user_id: int, message_id: str) -> Optional[dict[str, Any]]:
+    return get_conversation_repository().get_feedback(message_id, user_id)
+
+
+def stream_message(user_id: int, conversation_id: str, question: str):
+    """Validate a streaming request and return the SSE generator.
+
+    Validation happens here, before any bytes are sent: once a streamed
+    response has started, the status code is already committed and a 404 can no
+    longer be returned.
+    """
+    from apps.chat.streaming import chat_event_stream
+
+    conversation = get_conversation_repository().get(conversation_id, user_id)
+    if conversation is None:
+        raise ConversationNotFound('Session not found.')
+
+    if conversation.get('status') == SESSION_ARCHIVED:
+        raise ChatError('Cannot send messages to an archived session.')
+
+    document_ids = conversation.get('document_ids') or []
+    if not document_ids:
+        raise ChatError(
+            'This conversation has no documents left to search. Attach a '
+            'document to it and try again.'
+        )
+
+    return chat_event_stream(user_id, conversation_id, question, document_ids)

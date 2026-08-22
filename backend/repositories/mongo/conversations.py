@@ -8,7 +8,13 @@ from bson import ObjectId
 from django.utils import timezone
 
 from core.constants import ROLE_ASSISTANT, ROLE_USER, SESSION_ACTIVE
-from core.mongo import chat_sessions_col, chunks_col, documents_col, messages_col
+from core.mongo import (
+    chat_sessions_col,
+    chunks_col,
+    documents_col,
+    feedback_col,
+    messages_col,
+)
 from core.utils import serialize_mongo_doc
 from repositories.base import ConversationDTO, MessageDTO, Page
 from repositories.mongo.documents import _oid
@@ -259,3 +265,50 @@ class MongoConversationRepository:
             )
             updated += 1
         return updated
+
+    # ── feedback ─────────────────────────────────────────────────
+    def _owns_assistant_message(self, message_id: str, user_id: int):
+        """The message, if it is this user's and is an assistant reply."""
+        oid = _oid(message_id)
+        if oid is None:
+            return None
+        # user_id is on the message row, so ownership is part of the query
+        # rather than a check the caller has to remember.
+        return messages_col().find_one({
+            '_id': oid, 'user_id': user_id, 'role': ROLE_ASSISTANT,
+        })
+
+    def save_feedback(self, message_id: str, user_id: int, rating: int,
+                      reason: str = '', comment: str = ''):
+        message = self._owns_assistant_message(message_id, user_id)
+        if message is None:
+            return None
+
+        now = timezone.now()
+        record = {
+            'message_id': message_id,
+            'conversation_id': message.get('session_id', ''),
+            'user_id': user_id,
+            'rating': rating,
+            'reason': reason,
+            'comment': comment,
+            'reviewed': False,
+            'updated_at': now,
+        }
+        # Upsert on message_id, which carries a unique index: two rapid clicks
+        # cannot create two verdicts, and changing a rating corrects the
+        # existing row.
+        feedback_col().update_one(
+            {'message_id': message_id},
+            {'$set': record, '$setOnInsert': {'created_at': now}},
+            upsert=True,
+        )
+        return self.get_feedback(message_id, user_id)
+
+    def get_feedback(self, message_id: str, user_id: int):
+        record = feedback_col().find_one({'message_id': message_id, 'user_id': user_id})
+        if record is None:
+            return None
+        data = serialize_mongo_doc(record)
+        data['id'] = data.pop('_id', '')
+        return data

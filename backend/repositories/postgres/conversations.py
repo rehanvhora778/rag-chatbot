@@ -244,3 +244,68 @@ class PostgresConversationRepository:
         implement; it returns 0 because nothing needed updating.
         """
         return 0
+
+    # ── feedback ─────────────────────────────────────────────────
+    def _owned_assistant_message(self, message_id: str, user_id: int):
+        """The message, if it is this user's and is an assistant reply.
+
+        Ownership is reached through the conversation — a message has no owner
+        column of its own — and the filter is part of the query rather than a
+        check afterwards.
+        """
+        pk = _uuid(message_id)
+        if pk is None:
+            return None
+        return (Message.objects
+                .filter(pk=pk,
+                        role=MessageRole.ASSISTANT,
+                        conversation__owner_id=user_id)
+                .select_related('conversation')
+                .first())
+
+    def save_feedback(self, message_id: str, user_id: int, rating: int,
+                      reason: str = '', comment: str = ''):
+        from apps.chat.models import MessageFeedback
+
+        message = self._owned_assistant_message(message_id, user_id)
+        if message is None:
+            return None
+
+        # update_or_create against the one-to-one: a second rating corrects the
+        # first rather than raising on the uniqueness constraint.
+        MessageFeedback.objects.update_or_create(
+            message=message,
+            defaults={
+                'user_id': user_id,
+                'rating': rating,
+                'reason': reason,
+                'comment': comment,
+            },
+        )
+        return self.get_feedback(message_id, user_id)
+
+    def get_feedback(self, message_id: str, user_id: int):
+        from apps.chat.models import MessageFeedback
+
+        pk = _uuid(message_id)
+        if pk is None:
+            return None
+
+        record = (MessageFeedback.objects
+                  .filter(message_id=pk, message__conversation__owner_id=user_id)
+                  .first())
+        if record is None:
+            return None
+
+        return {
+            'id': str(record.pk),
+            'message_id': str(record.message_id),
+            'conversation_id': str(record.message.conversation_id),
+            'user_id': record.user_id,
+            'rating': record.rating,
+            'reason': record.reason,
+            'comment': record.comment,
+            'reviewed': record.reviewed,
+            'created_at': record.created_at,
+            'updated_at': record.updated_at,
+        }

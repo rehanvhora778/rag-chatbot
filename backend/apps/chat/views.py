@@ -15,9 +15,11 @@ from services.chat_service import ChatError, ConversationNotFound
 
 from .serializers import (
     CreateSessionSerializer,
+    FeedbackSerializer,
     SendMessageSerializer,
     UpdateSessionSerializer,
 )
+from .streaming import stream_response
 
 logger = logging.getLogger(__name__)
 
@@ -175,3 +177,66 @@ class ExportChatPDFView(APIView):
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
+
+
+class ChatStreamView(APIView):
+    """Streamed RAG answers over Server-Sent Events.
+
+    POST /api/chat/sessions/<id>/stream/
+
+    Everything that can be validated is validated before the generator starts:
+    once a streamed response has begun, the status code is already sent and a
+    404 or 400 can no longer be returned.
+    """
+
+    permission_classes = [IsAuthenticated]
+    throttle_scope = 'chat'
+
+    def post(self, request, session_id):
+        serializer = SendMessageSerializer(data=request.data)
+        if not serializer.is_valid():
+            return APIResponse.error('Validation failed.', serializer.errors)
+
+        try:
+            generator = chat_service.stream_message(
+                user_id=request.user.id,
+                conversation_id=session_id,
+                question=serializer.validated_data['question'],
+            )
+        except ConversationNotFound as exc:
+            return APIResponse.not_found(str(exc))
+        except ChatError as exc:
+            return APIResponse.error(str(exc))
+
+        return stream_response(generator)
+
+
+class MessageFeedbackView(APIView):
+    """Thumbs up or down on one answer.
+
+    POST /api/chat/messages/<id>/feedback/   record or change a verdict
+    GET  /api/chat/messages/<id>/feedback/   this user's existing verdict
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, message_id):
+        return APIResponse.success(
+            data=chat_service.get_feedback(request.user.id, message_id)
+        )
+
+    def post(self, request, message_id):
+        serializer = FeedbackSerializer(data=request.data)
+        if not serializer.is_valid():
+            return APIResponse.error('Validation failed.', serializer.errors)
+
+        try:
+            record = chat_service.submit_feedback(
+                request.user.id, message_id, **serializer.validated_data,
+            )
+        except ConversationNotFound as exc:
+            return APIResponse.not_found(str(exc))
+        except ChatError as exc:
+            return APIResponse.error(str(exc))
+
+        return APIResponse.success(data=record, message='Thanks for the feedback.')
