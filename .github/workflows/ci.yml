@@ -120,6 +120,18 @@ jobs:
           SECRET_KEY: a-long-random-key-for-the-check-only-0123456789abcdef
           ALLOWED_HOSTS: api.example.com
           DATABASE_URL: postgresql://raguser:ragpass@localhost:5432/ragchatbot_test
+          # Every value in this block is a stand-in: the step asks whether the
+          # production settings module is coherent, not whether these particular
+          # credentials work. Nothing here is dialled, and no request is made.
+          #
+          # This one is easy to mistake for something that ought to be a real
+          # secret. It must not be. `ragchat.W002` warns when no LLM key is
+          # configured, `--fail-level WARNING` makes that fatal, and a real key
+          # in CI would buy nothing except a credential exposed to every fork
+          # that runs this workflow. A placeholder satisfies "a key is
+          # configured" and leaves every other deployment warning still able to
+          # fail the build, which is the point of the step.
+          GROQ_API_KEY: placeholder-not-a-real-key-see-comment-above
         run: python manage.py check --deploy --fail-level WARNING
 
       - name: Run tests
