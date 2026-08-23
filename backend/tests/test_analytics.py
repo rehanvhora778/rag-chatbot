@@ -65,6 +65,56 @@ class TestBothEndpointsAnswerOnBothBackends:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Recording — the write side
+# ══════════════════════════════════════════════════════════════════
+
+class TestRecordEvent:
+    """``record_event`` wrote to MongoDB unconditionally.
+
+    On a PostgreSQL deployment every event was therefore dropped: the write
+    failed, ``record_event`` swallowed it by design, and the only trace was a
+    WARNING. Migrating the read side alone fixed nothing, because there was
+    nothing stored to read — which is exactly what these assertions catch, by
+    writing through the real entry point and reading back through the API
+    rather than checking a store directly.
+    """
+
+    def test_an_event_is_stored_and_read_back(self, client, user, backend,
+                                              record_event):
+        assert record_event(user, EVENT_QUERY) is True
+
+        data = client.get(ANALYTICS, **auth_header(user)).json()['data']
+
+        assert data['activity']['queries_last_30d'] == 1
+
+    def test_metadata_survives_the_round_trip(self, client, user, backend,
+                                              record_event):
+        """The activity feed's detail column is read straight out of it."""
+        record_event(user, EVENT_UPLOAD, filename='handbook.pdf')
+
+        activity = client.get(ANALYTICS, **auth_header(user)).json()['data']['recent_activity']
+
+        assert activity[0]['detail'] == 'handbook.pdf'
+
+    def test_a_failure_is_reported_rather_than_raised(self, user, backend,
+                                                      monkeypatch):
+        """Telemetry must never fail the request it is describing.
+
+        Asserted because the contract is a silent one: every caller ignores the
+        return value, so nothing else would notice if this started raising.
+        """
+        import core.analytics as analytics
+
+        def explode(*args, **kwargs):
+            raise RuntimeError('store is down')
+
+        monkeypatch.setattr(analytics, '_record_postgres', explode)
+        monkeypatch.setattr(analytics, '_record_mongo', explode)
+
+        assert analytics.record_event(user.id, EVENT_QUERY) is False
+
+
+# ══════════════════════════════════════════════════════════════════
 # The payload the React screens read
 # ══════════════════════════════════════════════════════════════════
 

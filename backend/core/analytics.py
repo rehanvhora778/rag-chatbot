@@ -11,11 +11,18 @@ bare ``except Exception: pass``. That shape has two problems:
 
 ``record_event`` keeps the first property (it never raises) and fixes the
 second (it logs). It is also the single seam through which analytics moves off
-MongoDB later, rather than four.
+MongoDB, rather than four.
+
+That seam went unused for longer than it should have. Until this was fixed the
+function wrote to MongoDB unconditionally, so on a PostgreSQL deployment every
+event was silently dropped — the write failed, logged a WARNING nobody was
+reading, and the analytics page showed zeroes for ever. Migrating the *read*
+side alone would have fixed nothing, because there was nothing to read.
 """
 import logging
 from typing import Any, Optional
 
+from django.conf import settings
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -32,15 +39,11 @@ def record_event(
     logged at WARNING with the event type, which is enough to notice that the
     analytics store is unreachable without drowning the log in stack traces.
     """
-    from core.mongo import analytics_col
-
     try:
-        analytics_col().insert_one({
-            'user_id': user_id,
-            'event_type': event_type,
-            'metadata': metadata or {},
-            'created_at': timezone.now(),
-        })
+        if getattr(settings, 'PERSISTENCE_BACKEND', 'mongo') == 'postgres':
+            _record_postgres(user_id, event_type, metadata or {})
+        else:
+            _record_mongo(user_id, event_type, metadata or {})
         return True
     except Exception as exc:
         logger.warning(
@@ -48,3 +51,28 @@ def record_event(
             event_type, user_id, exc,
         )
         return False
+
+
+def _record_postgres(user_id: Optional[int], event_type: str,
+                     metadata: dict[str, Any]) -> None:
+    from apps.analytics.models import AnalyticsEvent
+
+    # user_id rather than user: the column is nullable by design (see the model)
+    # and assigning an id avoids a SELECT to hydrate a User this never reads.
+    AnalyticsEvent.objects.create(
+        user_id=user_id, event_type=event_type, metadata=metadata,
+    )
+
+
+def _record_mongo(user_id: Optional[int], event_type: str,
+                  metadata: dict[str, Any]) -> None:
+    from core.mongo import analytics_col
+
+    analytics_col().insert_one({
+        'user_id': user_id,
+        'event_type': event_type,
+        'metadata': metadata,
+        # Set explicitly because MongoDB has no auto_now_add; the Postgres
+        # model fills this itself.
+        'created_at': timezone.now(),
+    })
