@@ -52,14 +52,27 @@ def stream_response(generator: Iterator[str]) -> StreamingHttpResponse:
     * ``Cache-Control: no-cache`` — the browser must not replay a stream.
     * ``X-Accel-Buffering: no`` — nginx buffers proxied responses by default,
       which is exactly what must not happen here.
-    * ``Connection: keep-alive`` — the connection stays open between events.
+
+    **``Connection: keep-alive`` is deliberately NOT set**, though it looks like
+    it belongs in that list. It is a hop-by-hop header, and PEP 3333 forbids a
+    WSGI application from setting one: connection reuse is negotiated between
+    the server and its client, not decided by the application. Django lets it
+    through, and ``wsgiref`` — which is what ``manage.py runserver`` uses —
+    asserts on it:
+
+        AssertionError: Hop-by-hop header, 'Connection: keep-alive', not allowed
+
+    The assertion fires while the response is being iterated, after the view has
+    returned, so it surfaced as a bare 500 with no traceback in the request log
+    and as "The connection was interrupted." in the browser. Nothing was wrong
+    with retrieval or generation. Setting it bought nothing either way: HTTP/1.1
+    connections persist by default.
     """
     response = StreamingHttpResponse(
         generator, content_type='text/event-stream',
     )
     response['Cache-Control'] = 'no-cache'
     response['X-Accel-Buffering'] = 'no'
-    response['Connection'] = 'keep-alive'
     return response
 
 

@@ -68,6 +68,31 @@ class TestStreamResponseHeaders:
         assert response['Cache-Control'] == 'no-cache'
         assert response['X-Accel-Buffering'] == 'no'
 
+    def test_no_hop_by_hop_header_is_set(self):
+        """A regression guard for a bug that took the whole feature down.
+
+        ``Connection: keep-alive`` looks like it belongs on a streamed
+        response, and it was set here. PEP 3333 forbids a WSGI application from
+        setting a hop-by-hop header — connection reuse is negotiated between
+        the server and its client — and ``wsgiref``, which is what
+        ``manage.py runserver`` uses, asserts on it:
+
+            AssertionError: Hop-by-hop header, 'Connection: keep-alive',
+            not allowed
+
+        Every streamed answer 500'd. It was invisible to the suite because the
+        Django test client does not enforce WSGI's rules, so the fix is guarded
+        by checking the header list directly rather than by making a request.
+        """
+        from wsgiref.util import is_hop_by_hop
+
+        from apps.chat.streaming import stream_response
+
+        response = stream_response(iter(['event: ping\ndata: {}\n\n']))
+
+        offenders = [name for name, _ in response.items() if is_hop_by_hop(name)]
+        assert offenders == [], f'hop-by-hop header(s) set: {offenders}'
+
 
 # ══════════════════════════════════════════════════════════════════
 # Feedback — run against both persistence backends

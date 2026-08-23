@@ -33,6 +33,10 @@ _BROKER_CACHE_SECONDS = 30
 # Short: this runs on the upload path, and a broker that is not there should
 # cost milliseconds to discover, not seconds.
 _BROKER_PROBE_TIMEOUT = 0.5
+# How long to wait for a worker to answer a ping. Longer than the socket probe
+# because this is a round trip through the broker rather than a TCP connect,
+# and it is paid at most once per _BROKER_CACHE_SECONDS.
+_WORKER_PING_TIMEOUT = 0.75
 
 
 class DocumentError(Exception):
@@ -221,11 +225,19 @@ def _process_in_thread(document_id: str, user_id: int, file_path: str,
 
 
 def broker_available() -> bool:
-    """Is a Celery broker reachable right now?
+    """Will a Celery worker actually run a task dispatched right now?
 
-    Cached for a short time because this is on the upload path and a dead
-    broker otherwise costs every upload a connection timeout. Short enough that
-    starting Redis is picked up without restarting Django.
+    Note what this asks. Not "is there a broker" — "will the job get done". The
+    two come apart in a way that matters: a Redis belonging to some other
+    project on the same machine answers on 6379 just as readily as one this
+    project owns, and dispatching into it with no worker attached means the
+    document sits at "pending" for ever. Nothing raises, nothing retries, and
+    the sweep that would eventually mark it failed is itself a Celery task that
+    is not running either. A silent hang is a worse failure than the thread
+    fallback this question exists to choose.
+
+    Cached for a short time because this is on the upload path. Short enough
+    that starting a worker is picked up without restarting Django.
     """
     from django.core.cache import cache
 
@@ -244,18 +256,13 @@ def broker_available() -> bool:
 
 
 def _probe_broker() -> bool:
-    """Can the broker's port be opened?
+    """Port open first, then a worker that answers. Both, or fall back.
 
-    A plain socket connect rather than ``connection.ensure_connection``. Kombu
-    does not apply its timeout to the initial TCP connect, so probing a broker
-    that is simply not there took over four seconds — paid by the first upload
-    after every restart, which is precisely the request that should feel fast.
-    A socket with an explicit timeout answers in milliseconds.
-
-    This proves the port is open, not that a healthy broker is behind it. That
-    is the right amount of certainty here: the decision being made is "dispatch
-    or fall back", and if the port is open but the broker is broken, the task
-    lands in Celery's own retry machinery, which is where that failure belongs.
+    The socket check comes first because it is the cheap way to rule out the
+    common case. A plain connect rather than ``connection.ensure_connection``:
+    kombu does not apply its timeout to the initial TCP connect, so probing a
+    broker that is simply not there took over four seconds — paid by the first
+    upload after every restart, precisely the request that should feel fast.
     """
     import socket
     from urllib.parse import urlparse
@@ -268,10 +275,54 @@ def _probe_broker() -> bool:
 
     try:
         with socket.create_connection((host, port), timeout=_BROKER_PROBE_TIMEOUT):
-            return True
+            pass
     except OSError as exc:
         logger.debug('Celery broker at %s:%s is not reachable: %s', host, port, exc)
         return False
+
+    return _worker_listening(host, port)
+
+
+def _worker_listening(host: str, port: int) -> bool:
+    """Does any worker answer a ping on this broker?
+
+    An open port only proves something is listening on it — not that it is this
+    project's broker, and not that anything is consuming the queue. Redis in
+    particular is shared infrastructure that other projects leave running, so
+    "port 6379 answered" is weak evidence and dispatching on it alone is how a
+    document ends up queued into a stranger's Redis, never processed.
+
+    ``ping`` is a broadcast that only live workers reply to, which is exactly
+    the question being asked. A broker that is present but unhealthy also
+    produces no replies, and falling back to the thread is the right answer
+    there too — the work gets done either way.
+    """
+    try:
+        from config import celery_app
+    except ImportError:
+        return False
+
+    if celery_app is None:
+        # Celery is not installed — the trimmed production image does this.
+        return False
+
+    try:
+        replies = celery_app.control.ping(timeout=_WORKER_PING_TIMEOUT)
+    except Exception as exc:
+        # Any transport-level problem means the same thing to the caller.
+        logger.debug('Could not ping Celery workers on %s:%s: %s', host, port, exc)
+        return False
+
+    if not replies:
+        logger.info(
+            'A broker answers on %s:%s but no Celery worker replied, so a task '
+            'dispatched now would never run. Processing in a thread instead — '
+            'start a worker to use the queue.',
+            host, port,
+        )
+        return False
+
+    return True
 
 
 def processing_status(user_id: int, document_ids: list[str]) -> list[dict[str, Any]]:
