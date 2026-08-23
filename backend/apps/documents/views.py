@@ -2,7 +2,7 @@
 
 HTTP only: parse the request, call a service, shape the response. Every rule
 about what may be uploaded, what counts as a duplicate and what deleting a
-document has to clean up lives in services/document_service.py, where it can be
+document has to clean up lives in apps/documents/services.py, where it can be
 tested without a request.
 """
 import logging
@@ -14,10 +14,10 @@ from rest_framework.views import APIView
 from core.responses import APIResponse
 from core.utils import format_file_size
 from repositories.factory import get_document_repository
-from services import document_service
-from services.document_service import DocumentError
 
+from . import services as document_service
 from .serializers import RenameDocumentSerializer
+from .services import DocumentError
 
 logger = logging.getLogger(__name__)
 

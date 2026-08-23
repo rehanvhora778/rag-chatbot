@@ -1,10 +1,9 @@
 """Local sentence-transformer embeddings.
 
-Wraps services/embeddings, which runs all-MiniLM-L6-v2 through ONNX Runtime
-(DirectML where a GPU is available) and falls back to PyTorch. That module stays
-where it is: it handles the awkward parts — thread-safe lazy loading, batching
-by length to minimise padding, the ONNX-to-torch fallback — and the value of
-this class is the interface, not a rewrite.
+Runs all-MiniLM-L6-v2 through ONNX Runtime (DirectML where a GPU is
+available), falling back to PyTorch. The machinery — thread-safe lazy loading,
+batching by length to minimise padding, the ONNX-to-torch fallback — lives in
+``onnx_backend.py``; this class is the interface over it.
 
 Local rather than hosted is a real choice. Embedding a 50-page document is a
 hundred passages; sending them to a paid API would make ingestion cost money
@@ -39,14 +38,14 @@ class LocalEmbeddingProvider:
         return settings.EMBEDDING_DIMENSION
 
     def embed_documents(self, texts: list[str]) -> np.ndarray:
-        from services.embeddings import embed_texts
+        from rag.embeddings.onnx_backend import embed_texts
 
         if not texts:
             return np.zeros((0, self.dimension), dtype=np.float32)
         return embed_texts(texts)
 
     def embed_query(self, text: str) -> np.ndarray:
-        from services.embeddings import embed_query
+        from rag.embeddings.onnx_backend import embed_query
 
         return embed_query(text)
 

@@ -72,9 +72,9 @@ def chat_event_stream(user_id: int, conversation_id: str, question: str,
     connection and leave the browser unable to distinguish a failure from a
     network problem.
     """
+    from apps.documents.services import resolve_index_keys
     from rag.chains import rag_chain
     from repositories.factory import get_conversation_repository
-    from services.rag_pipeline import resolve_index_keys
 
     repository = get_conversation_repository()
     answer_parts: list[str] = []
@@ -163,9 +163,9 @@ def chat_event_stream(user_id: int, conversation_id: str, question: str,
 def _recent_history(repository, conversation_id: str, user_id: int) -> list[dict]:
     from django.conf import settings
 
-    from services.rag_pipeline import _trim_history
+    from apps.chat.services import trim_history
 
-    return _trim_history(
+    return trim_history(
         repository.recent_history(
             conversation_id, user_id, settings.CONVERSATION_MEMORY_TURNS,
         )

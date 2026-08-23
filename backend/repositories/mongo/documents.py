@@ -142,7 +142,7 @@ class MongoDocumentRepository:
                 'end_char': chunk.get('end_char', 0),
                 'word_count': chunk.get('word_count', 0),
                 # Stored alongside the text so a lost FAISS index can be rebuilt
-                # without re-embedding. See services/faiss_store.rebuild_index.
+                # without re-embedding. See rag/vectorstores/faiss_store.rebuild_index.
                 'embedding': Binary(vector.tobytes()) if vector is not None else None,
                 'created_at': now,
             })

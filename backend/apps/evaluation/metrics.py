@@ -149,7 +149,7 @@ def is_refusal(answer: str) -> bool:
     trailing whitespace or a newline, and an evaluation that scores those as
     "answered anyway" would report a grounding failure that did not happen.
     """
-    from services.llm import REFUSAL_MESSAGE
+    from rag.prompts.grounding import REFUSAL_MESSAGE
 
     normalised = ' '.join((answer or '').split()).lower()
     canonical = ' '.join(REFUSAL_MESSAGE.split()).lower()

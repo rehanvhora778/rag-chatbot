@@ -18,7 +18,7 @@ from bson import ObjectId
 from django.core.management.base import BaseCommand, CommandError
 
 from core.mongo import documents_col
-from services.document_processor import process_document
+from rag.ingestion.pipeline import process_document
 
 
 class Command(BaseCommand):

@@ -249,12 +249,12 @@ class AdminDocumentDetailView(APIView):
                 # orphaned on disk and nothing else will ever clean it up.
                 logger.warning("Could not delete %s: %s", file_path, exc)
 
-        # Delete FAISS index
+        # Delete the document's vectors
         try:
-            from services.faiss_store import delete_index
-            delete_index(doc['user_id'], doc_id)
+            from rag.registry import get_vector_store
+            get_vector_store().delete(doc['user_id'], doc_id)
         except Exception as exc:
-            logger.warning("Could not delete the FAISS index for %s: %s", doc_id, exc)
+            logger.warning("Could not delete the vector index for %s: %s", doc_id, exc)
 
         from core.mongo import chunks_col
         chunks_col().delete_many({'document_id': doc_id})

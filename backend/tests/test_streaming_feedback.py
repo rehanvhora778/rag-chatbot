@@ -166,13 +166,13 @@ class TestFeedbackValidation:
     """Rules enforced by the service rather than the repository."""
 
     def test_an_invalid_rating_is_rejected(self, backend, user):
-        from services.chat_service import ChatError, submit_feedback
+        from apps.chat.services import ChatError, submit_feedback
 
         with pytest.raises(ChatError, match='Rating must be'):
             submit_feedback(user.id, 'any-id', rating=5)
 
     def test_an_unknown_reason_is_rejected(self, backend, user):
-        from services.chat_service import ChatError, submit_feedback
+        from apps.chat.services import ChatError, submit_feedback
 
         with pytest.raises(ChatError, match='Unknown reason'):
             submit_feedback(user.id, 'any-id', rating=-1, reason='because')
@@ -181,7 +181,7 @@ class TestFeedbackValidation:
                                                       answered_conversation):
         """Every reason describes a way the answer was wrong, so one attached
         to a thumbs-up is noise in the queue of things to fix."""
-        from services.chat_service import submit_feedback
+        from apps.chat.services import submit_feedback
 
         _conversation, answer = answered_conversation
 

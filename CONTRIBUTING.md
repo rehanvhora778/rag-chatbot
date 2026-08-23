@@ -62,7 +62,13 @@ large diff containing no fix.
 ## Conventions
 
 **Views do HTTP.** Parse a request, call a service, shape a response. If a view
-is making decisions, those belong in `services/`.
+is making decisions, those belong in that app's `services.py`.
+
+**The engine does not know about the app.** Nothing in `rag/` may import a
+view, a serializer or a conversation. It takes a user id, a question and a set
+of index keys; turning application objects into those is the calling app's job.
+A retrieval change that needs to know what a chat session is belongs on the
+app side of that line, not inside `rag/`.
 
 **Repositories are the only code that knows which store is live.** Anything
 importing `core.mongo` or `apps.*.models` outside `repositories/` is a layering

@@ -116,10 +116,11 @@ def _parse(reply: str) -> Verdict:
 
 
 def _ask(prompt: str) -> Verdict:
-    from services.llm import _call_with_retry
+    from rag.llm.base import Message
+    from rag.registry import get_llm
 
     try:
-        reply = _call_with_retry([{'role': 'user', 'content': prompt}])
+        reply = get_llm().complete([Message(role='user', content=prompt)]).text
     except Exception as exc:
         # One judge failure must not abandon the run: the remaining cases still
         # produce usable deterministic metrics.

@@ -40,17 +40,20 @@ def fake_pipeline(monkeypatch):
         calls['extract'] += 1
         return list(PAGES)
 
-    def fake_embed(chunks):
+    def fake_embed(texts, batch_size=None):
         calls['embed'] += 1
         # Deterministic and normalised, so anything that later compares vectors
         # gets sensible values rather than noise.
-        vectors = np.zeros((len(chunks), 384), dtype=np.float32)
-        for i in range(len(chunks)):
+        vectors = np.zeros((len(texts), 384), dtype=np.float32)
+        for i in range(len(texts)):
             vectors[i][i % 384] = 1.0
         return vectors
 
-    monkeypatch.setattr('services.text_extractor.extract_text', fake_extract)
-    monkeypatch.setattr('services.embeddings.embed_chunks', fake_embed)
+    monkeypatch.setattr('rag.ingestion.extract.extract_text', fake_extract)
+    # Patched at the backend rather than on the provider: the provider is
+    # cached by the registry, so replacing the function it calls is what
+    # actually takes effect.
+    monkeypatch.setattr('rag.embeddings.onnx_backend.embed_texts', fake_embed)
     return calls
 
 
@@ -82,7 +85,7 @@ class TestIdempotency:
         double the chunk count and the same passage would be retrieved several
         times, crowding the context window with duplicates.
         """
-        from services.document_processor import process_document
+        from rag.ingestion.pipeline import process_document
 
         first = process_document(
             pending_document['id'], user.id, '/nonexistent/stored.pdf', 'pdf',
@@ -100,7 +103,7 @@ class TestIdempotency:
     def test_reprocessing_replaces_rather_than_accumulates(
         self, document_repo, user, pending_document, fake_pipeline
     ):
-        from services.document_processor import process_document
+        from rag.ingestion.pipeline import process_document
 
         process_document(pending_document['id'], user.id, '/nonexistent/x.pdf', 'pdf')
         document = document_repo.get(pending_document['id'], user.id)
@@ -121,7 +124,7 @@ class TestStatusTransitions:
     def test_a_successful_run_records_what_it_produced(
         self, document_repo, user, pending_document, fake_pipeline
     ):
-        from services.document_processor import process_document
+        from rag.ingestion.pipeline import process_document
 
         process_document(pending_document['id'], user.id, '/nonexistent/x.pdf', 'pdf')
 
@@ -140,14 +143,14 @@ class TestStatusTransitions:
         "Failed" with no reason gives the user nothing to act on and gives
         whoever debugs it nothing to search for.
         """
-        from services.document_processor import process_document
+        from rag.ingestion.pipeline import process_document
 
         monkeypatch.setattr(
-            'services.text_extractor.extract_text',
+            'rag.ingestion.extract.extract_text',
             lambda *a, **k: [],          # nothing extractable
         )
 
-        from services.document_processor import ProcessingError
+        from rag.ingestion.pipeline import ProcessingError
 
         with pytest.raises(ProcessingError):
             process_document(pending_document['id'], user.id, '/nonexistent/x.pdf', 'pdf')
@@ -164,7 +167,7 @@ class TestStatusTransitions:
         There is nothing to process and nothing a retry would fix, so this must
         return quietly rather than raising into Celery's retry machinery.
         """
-        from services.document_processor import process_document
+        from rag.ingestion.pipeline import process_document
 
         document_id = pending_document['id']
         document_repo.delete(document_id, user.id)
@@ -186,7 +189,7 @@ class TestDispatch:
         """The point of the whole phase: the request does not do the work."""
         from django.core.files.uploadedfile import SimpleUploadedFile
 
-        from services import document_service
+        from apps.documents import services as document_service
 
         queued = []
         monkeypatch.setattr(
@@ -214,7 +217,7 @@ class TestDispatch:
         The fallback has exactly the failure mode this phase removes, so it
         being silent would be worse than it not existing.
         """
-        from services import document_service
+        from apps.documents import services as document_service
 
         settings.CELERY_TASK_ALWAYS_EAGER = False
         monkeypatch.setattr(document_service, '_probe_broker', lambda: False)
@@ -236,7 +239,7 @@ class TestDispatch:
         """Checked on every upload; a dead broker must not cost a timeout each time."""
         from django.core.cache import cache
 
-        from services import document_service
+        from apps.documents import services as document_service
 
         settings.CELERY_TASK_ALWAYS_EAGER = False
         cache.delete(document_service._BROKER_CACHE_KEY)

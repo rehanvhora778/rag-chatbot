@@ -1,5 +1,4 @@
-"""
-Module 6: Chunking — cutting a page into pieces small enough to embed.
+"""Chunking — cutting a page into pieces small enough to embed.
 
 An embedding is a single vector for a whole passage, so a passage covering five
 topics averages into a vague vector that matches nothing well. Chunks are

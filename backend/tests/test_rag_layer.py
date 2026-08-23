@@ -145,12 +145,6 @@ class TestRefusalConsistency:
         assert REFUSAL_MESSAGE in system
         assert '{refusal}' not in system
 
-    def test_the_legacy_import_path_is_the_same_object(self):
-        from rag.prompts.grounding import REFUSAL_MESSAGE as canonical
-        from services.llm import REFUSAL_MESSAGE as legacy
-
-        assert legacy == canonical
-
     def test_the_metrics_recognise_it(self):
         from apps.evaluation import metrics
         from rag.prompts.grounding import REFUSAL_MESSAGE

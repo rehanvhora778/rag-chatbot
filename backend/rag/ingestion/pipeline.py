@@ -53,9 +53,9 @@ def process_document(document_id: str, user_id: int, file_path: str,
     error and can retry.
     """
     from core.constants import STATUS_COMPLETED, STATUS_FAILED, STATUS_PROCESSING
-    from services.chunker import chunk_pages
-    from services.embeddings import embed_chunks
-    from services.text_extractor import extract_text, get_word_count
+    from rag.ingestion.chunker import chunk_pages
+    from rag.ingestion.extract import extract_text, get_word_count
+    from rag.registry import get_embeddings
 
     repository = _repository()
     started = time.perf_counter()
@@ -106,7 +106,7 @@ def process_document(document_id: str, user_id: int, file_path: str,
         logger.info('%s: %d chunks, embedding…', filename or document_id, len(chunks))
 
         # --- 3. Vectors ---
-        embeddings = embed_chunks(chunks)
+        embeddings = get_embeddings().embed_documents([c['content'] for c in chunks])
         logger.info('%s: embedded %d chunks, storing…', filename or document_id, len(chunks))
 
         # --- 4. Store ---
@@ -167,8 +167,8 @@ def generate_summary(document_id: str, user_id: int) -> Optional[str]:
     text extraction does. Keeping it apart means a summary failure cannot mark
     a perfectly indexed document as failed, and it can be retried on its own.
     """
-    from services.llm import generate_document_summary
-    from services.text_extractor import extract_text
+    from rag.chains.summarize import generate_document_summary
+    from rag.ingestion.extract import extract_text
 
     repository = _repository()
     document = repository.get(document_id, user_id)
@@ -197,24 +197,20 @@ def _index_key(document: dict[str, Any]) -> str:
 
 def _save_vector_index(user_id: int, document: dict[str, Any],
                        embeddings, chunk_ids: list[str]) -> None:
-    from django.conf import settings
+    """Hand the vectors to whichever store is configured.
 
-    if settings.VECTOR_BACKEND != 'faiss':
-        # pgvector stores each vector on its chunk row, which replace_chunks
-        # has already written. Nothing else to do.
-        return
+    There is no ``if backend == 'faiss'`` here any more: pgvector keeps each
+    vector on the chunk row that ``replace_chunks`` has already written, so its
+    ``add`` is a no-op by design. Asking the store to do the right thing beats
+    asking a setting which store is in use — the branch was one more place to
+    update when a third backend arrives.
+    """
+    from rag.registry import get_vector_store
 
-    from services.faiss_store import save_index
-
-    save_index(user_id, _index_key(document), embeddings, chunk_ids)
+    get_vector_store().add(user_id, _index_key(document), embeddings, chunk_ids)
 
 
 def _delete_vector_index(user_id: int, document: dict[str, Any]) -> None:
-    from django.conf import settings
+    from rag.registry import get_vector_store
 
-    if settings.VECTOR_BACKEND != 'faiss':
-        return
-
-    from services.faiss_store import delete_index
-
-    delete_index(user_id, _index_key(document))
+    get_vector_store().delete(user_id, _index_key(document))

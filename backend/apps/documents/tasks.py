@@ -45,7 +45,7 @@ RETRY_FOR = (ConnectionError, TimeoutError, OSError)
 def process_document_task(self, document_id: str, user_id: int,
                           file_path: str, file_type: str) -> dict:
     """Extract, chunk, embed and index one uploaded document."""
-    from services.document_processor import process_document
+    from rag.ingestion.pipeline import process_document
 
     logger.info('Processing document %s (attempt %d/%d)',
                 document_id, self.request.retries + 1, self.max_retries + 1)
@@ -101,7 +101,7 @@ def generate_summary_task(self, document_id: str, user_id: int) -> dict:
     working document as failed because a rate limit was hit would be worse than
     the gap.
     """
-    from services.document_processor import generate_summary
+    from rag.ingestion.pipeline import generate_summary
 
     try:
         summary = generate_summary(document_id, user_id)
@@ -125,8 +125,8 @@ def reindex_document_task(document_id: str, user_id: int) -> dict:
     rather than taking it as an argument, so a caller cannot point it at a file
     belonging to somebody else.
     """
+    from rag.ingestion.pipeline import process_document
     from repositories.factory import get_document_repository
-    from services.document_processor import process_document
 
     document = get_document_repository().get(document_id, user_id)
     if document is None:
@@ -146,19 +146,17 @@ def delete_document_embeddings_task(document_id: str, user_id: int,
     would hold the HTTP request open. Takes the index key explicitly because by
     the time this runs the document row may already be gone.
     """
-    from django.conf import settings
-
+    from rag.registry import get_vector_store
     from repositories.factory import get_document_repository
 
     removed = get_document_repository().delete_chunks(document_id, user_id)
 
-    if settings.VECTOR_BACKEND == 'faiss':
-        from services.faiss_store import delete_index
-
-        try:
-            delete_index(user_id, index_key or document_id)
-        except Exception as exc:
-            logger.warning('Could not delete the index for %s: %s', document_id, exc)
+    # No backend check: pgvector's delete is a no-op because the cascade
+    # that removed the chunks removed their vectors with them.
+    try:
+        get_vector_store().delete(user_id, index_key or document_id)
+    except Exception as exc:
+        logger.warning('Could not delete the index for %s: %s', document_id, exc)
 
     return {'document_id': document_id, 'chunks_deleted': removed}
 

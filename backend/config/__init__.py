@@ -5,7 +5,7 @@ this package before any app, so by the time a tasks.py is imported there is an
 app for its tasks to attach to.
 
 Celery is optional — the project still runs without the broker installed, in
-which case tasks fall back to running inline (see services/tasks.py).
+which case tasks fall back to running inline (see apps/documents/services.py).
 """
 
 try:

@@ -16,9 +16,10 @@ Usage:
 from bson import ObjectId
 from django.core.management.base import BaseCommand, CommandError
 
+from apps.documents.services import retrieve_relevant_chunks
 from core.mongo import chat_sessions_col
-from services.llm import REFUSAL_MESSAGE, generate_rag_response
-from services.rag_pipeline import retrieve_relevant_chunks
+from rag.chains.rag_chain import generate_from_chunks
+from rag.prompts.grounding import REFUSAL_MESSAGE
 
 DEFAULT_QUESTIONS = [
     "What are embeddings?",
@@ -82,7 +83,7 @@ class Command(BaseCommand):
         top = max((c['similarity_score'] for c in chunks), default=0.0)
 
         if chunks:
-            answer = generate_rag_response(question, chunks, [])
+            answer = generate_from_chunks(question, chunks, [])
         else:
             answer = REFUSAL_MESSAGE
 

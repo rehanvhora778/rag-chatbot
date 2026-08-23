@@ -3,6 +3,12 @@
 The view used to do session lookup, validation, retrieval, generation, storage
 and analytics in one method. Those are separable concerns with different
 failure modes, and only one of them is about HTTP.
+
+This is the seam between the application and the RAG engine. Everything above
+it deals in conversations, users and permissions; everything below — in
+``rag/`` — deals in questions, passages and vectors and has never heard of
+either. ``answer_question`` is where the two meet: it resolves a conversation
+to the documents it may search, runs the chain, and records the exchange.
 """
 import logging
 from typing import Any, Optional
@@ -133,8 +139,6 @@ def send_message(user_id: int, conversation_id: str, question: str,
             'document to it and try again.'
         )
 
-    from services.rag_pipeline import answer_question
-
     result = answer_question(
         user_id=user_id,
         conversation_id=conversation_id,
@@ -159,12 +163,94 @@ def send_message(user_id: int, conversation_id: str, question: str,
 
 
 # ══════════════════════════════════════════════════════════════════
+# Running one question through the RAG chain
+# ══════════════════════════════════════════════════════════════════
+
+def answer_question(user_id: int, conversation_id: str, document_ids: list[str],
+                    question: str) -> dict[str, Any]:
+    """Answer one question in a conversation, and record the exchange."""
+    from apps.documents.services import resolve_index_keys
+    from rag.chains import rag_chain
+
+    conversations = get_conversation_repository()
+
+    history = trim_history(
+        conversations.recent_history(
+            conversation_id, user_id, settings.CONVERSATION_MEMORY_TURNS,
+        )
+    )
+
+    result = rag_chain.run(
+        user_id=user_id,
+        question=question,
+        document_keys=resolve_index_keys(user_id, document_ids),
+        history=history,
+    )
+
+    conversations.add_turn(
+        conversation_id, user_id,
+        question=question,
+        answer=result.answer,
+        sources=result.citations,
+        provider=result.provider,
+        model_name=result.model,
+        prompt_tokens=result.prompt_tokens,
+        completion_tokens=result.completion_tokens,
+        total_tokens=result.total_tokens,
+        retrieval_ms=result.retrieval_ms,
+        generation_ms=result.generation_ms,
+        total_ms=result.total_ms,
+        chunks_retrieved=len(result.documents),
+    )
+
+    return {
+        'answer': result.answer,
+        'citations': result.citations,
+        'chunks_retrieved': len(result.documents),
+        'debug': {
+            'retrieval_ms': result.retrieval_ms,
+            'generation_ms': result.generation_ms,
+            'provider': result.provider,
+            'model': result.model,
+            'total_tokens': result.total_tokens,
+            'truncated': result.truncated,
+            'retrieved_chunks': [
+                {
+                    'document_name': c['document_name'],
+                    'page_number': c['page_number'],
+                    'similarity_score': round(c['similarity_score'], 4),
+                    'preview': c['content'][:200],
+                }
+                for c in result.chunks
+            ],
+        },
+    }
+
+
+def trim_history(history: list[dict[str, Any]],
+                 max_chars: Optional[int] = None) -> list[dict[str, Any]]:
+    """Keep the most recent turns within a character budget.
+
+    Whole turns are dropped rather than a message being truncated: half a
+    question followed by a full answer reads as a non-sequitur, and the model
+    treats it as context it is supposed to make sense of.
+    """
+    budget = max_chars or 3000
+    trimmed = list(history)
+
+    while trimmed and sum(len(m['content']) for m in trimmed) > budget:
+        trimmed = trimmed[2:]        # oldest user + assistant pair
+
+    return trimmed
+
+
+# ══════════════════════════════════════════════════════════════════
 # Export
 # ══════════════════════════════════════════════════════════════════
 
 def export_conversation_pdf(user_id: int, conversation_id: str) -> tuple[bytes, str]:
     """Render a conversation to a PDF. Returns the bytes and a filename."""
-    from services.pdf_export import build_export_filename, export_chat_to_pdf
+    from apps.chat.export import build_export_filename, export_chat_to_pdf
 
     repository = get_conversation_repository()
     conversation = repository.get(conversation_id, user_id)

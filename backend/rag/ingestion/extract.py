@@ -111,7 +111,7 @@ def _ocr_image_b64(img_b64: str, page_num: int) -> str:
     parallelize across scanned pages.
     """
     try:
-        from services.llm import read_image
+        from rag.llm.vision import read_image
 
         text = read_image(
             img_b64,
@@ -134,7 +134,7 @@ def extract_text_from_pdf(file_path: str) -> List[Dict[str, Any]]:
     import fitz  # PyMuPDF
     from django.conf import settings
 
-    from services.chunker import clean_text
+    from rag.ingestion.chunker import clean_text
 
     pages = []
     scanned_pages = []

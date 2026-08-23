@@ -17,7 +17,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["apps", "core", "services", "rag"]
+source = ["apps", "core", "rag", "repositories"]
 omit = [
     "*/migrations/*",
     "*/tests/*",
@@ -81,4 +81,4 @@ ignore = [
 "tests/*" = ["S105", "S106", "S107"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["apps", "core", "services", "rag", "config"]
+known-first-party = ["apps", "core", "rag", "repositories", "config"]

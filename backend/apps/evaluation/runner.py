@@ -118,7 +118,8 @@ def settings_snapshot() -> dict[str, Any]:
 
 def evaluate_case(case: EvaluationCase, user_id: int, document_ids: list[str],
                   judge: bool = False) -> CaseOutcome:
-    from services.llm import REFUSAL_MESSAGE, generate_rag_response
+    from rag.chains.rag_chain import generate_from_chunks
+    from rag.prompts.grounding import REFUSAL_MESSAGE
 
     outcome = CaseOutcome(case=case)
 
@@ -141,7 +142,7 @@ def evaluate_case(case: EvaluationCase, user_id: int, document_ids: list[str],
             # No conversation history: each case is scored on its own question,
             # so that a run's numbers do not depend on the order cases happen
             # to be stored in.
-            outcome.answer = generate_rag_response(case.question, outcome.chunks, [])
+            outcome.answer = generate_from_chunks(case.question, outcome.chunks, [])
         except Exception as exc:
             # The generation failed, but retrieval did not, and what came back
             # is still measurable. Discarding it would mean a provider rate
@@ -178,9 +179,9 @@ def _retrieve_with_trace(user_id: int, document_ids: list[str],
     identically to the baseline and be read as evidence that reranking does not
     help.
     """
+    from apps.documents.services import resolve_index_keys
     from rag.retrievers.hybrid import build_retriever
     from rag.types import documents_to_chunks
-    from services.rag_pipeline import resolve_index_keys
 
     keys = resolve_index_keys(user_id, document_ids)
     if not keys:

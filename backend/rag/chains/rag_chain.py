@@ -143,6 +143,26 @@ def _role_of(message) -> str:
     return mapping.get(getattr(message, 'type', 'human'), 'user')
 
 
+def generate_from_chunks(question: str, chunks: list[dict[str, Any]],
+                        history: Optional[list[dict]] = None) -> str:
+    """Answer from passages that have already been retrieved.
+
+    ``run()`` retrieves and then generates; this is the second half on its own,
+    for the two callers that hold a fixed set of passages: the evaluation
+    harness, which must score generation against the exact chunks its retrieval
+    step just measured, and the ``test_rag`` smoke command. Calling ``run()``
+    instead would retrieve a second time and answer from a different set than
+    the one being reported.
+    """
+    from rag.registry import get_llm
+    from rag.types import chunks_to_documents
+
+    messages, _hardened = build_messages(
+        question, chunks_to_documents(chunks), history or [],
+    )
+    return get_llm().complete(messages).text
+
+
 def run(user_id: int, question: str, document_keys: list[str],
         history: Optional[list[dict]] = None,
         filters: Optional[dict[str, Any]] = None) -> RAGResult:

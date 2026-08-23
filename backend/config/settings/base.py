@@ -498,7 +498,7 @@ GROQ_TEMPERATURE       = config('GROQ_TEMPERATURE', default=0.2, cast=float)
 # RAG PIPELINE
 # ═══════════════════════════════════════════════════════════════
 
-# Chunking is CHARACTER-based (see services/chunker.py).
+# Chunking is CHARACTER-based (see rag/ingestion/chunker.py).
 RAG_CHUNK_SIZE           = config('RAG_CHUNK_SIZE',           default=900,  cast=int)
 RAG_CHUNK_OVERLAP        = config('RAG_CHUNK_OVERLAP',        default=200,  cast=int)
 
@@ -623,11 +623,6 @@ LOGGING = {
             'propagate': False,
         },
         'core': {
-            'handlers': ['console', 'app_file', 'error_file'],
-            'level': 'DEBUG' if DEBUG else 'INFO',
-            'propagate': False,
-        },
-        'services': {
             'handlers': ['console', 'app_file', 'error_file'],
             'level': 'DEBUG' if DEBUG else 'INFO',
             'propagate': False,

@@ -112,12 +112,12 @@ class TestTokenF1:
 
 class TestRefusalDetection:
     def test_the_canonical_refusal_is_recognised(self):
-        from services.llm import REFUSAL_MESSAGE
+        from rag.prompts.grounding import REFUSAL_MESSAGE
 
         assert metrics.is_refusal(REFUSAL_MESSAGE) is True
 
     def test_trailing_whitespace_does_not_break_it(self):
-        from services.llm import REFUSAL_MESSAGE
+        from rag.prompts.grounding import REFUSAL_MESSAGE
 
         assert metrics.is_refusal(REFUSAL_MESSAGE + '\n\n  ') is True
 
@@ -232,7 +232,7 @@ class TestFaithfulness:
         Scoring a refusal as unfaithful would penalise exactly the behaviour the
         grounding prompt exists to produce, and reward a pipeline that guesses.
         """
-        from services.llm import REFUSAL_MESSAGE
+        from rag.prompts.grounding import REFUSAL_MESSAGE
 
         assert metrics.faithfulness_lexical(REFUSAL_MESSAGE, []) == 1.0
 

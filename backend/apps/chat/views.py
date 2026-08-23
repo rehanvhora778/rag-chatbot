@@ -1,7 +1,7 @@
 """Chat endpoints.
 
 HTTP only. Retrieval, generation, storage and analytics live in
-services/chat_service.py and services/rag_pipeline.py.
+apps/chat/services.py, which is the seam onto the RAG engine in rag/.
 """
 import logging
 
@@ -10,15 +10,15 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
 from core.responses import APIResponse
-from services import chat_service
-from services.chat_service import ChatError, ConversationNotFound
 
+from . import services as chat_service
 from .serializers import (
     CreateSessionSerializer,
     FeedbackSerializer,
     SendMessageSerializer,
     UpdateSessionSerializer,
 )
+from .services import ChatError, ConversationNotFound
 from .streaming import stream_response
 
 logger = logging.getLogger(__name__)

@@ -12,13 +12,16 @@ React + Tailwind
 Django REST Framework  ── views: HTTP only
       │
       ▼
-services/              ── the rules: validation, quotas, orchestration
+apps/*/services.py     ── the rules: validation, quotas, orchestration
       │
-      ├──────────────► rag/          ── retrieval, prompting, generation
+      ├──────────────► rag/          ── the engine, built on LangChain
+      │                   ├ ingestion/   extract · chunk · embed · index
       │                   ├ retrievers/  vector · keyword · hybrid (RRF)
       │                   ├ reranking/   cross-encoder
       │                   ├ vectorstores/ pgvector · FAISS
+      │                   ├ embeddings/  all-MiniLM-L6-v2 (ONNX)
       │                   ├ llm/         provider interface (Groq)
+      │                   ├ chains/      RAG chain · summarisation
       │                   ├ prompts/     the grounding prompt
       │                   └ security/    prompt-injection defence
       │
@@ -30,6 +33,18 @@ repositories/          ── the only layer that knows which store is live
 
 Celery + Redis ── ingestion: extract → chunk → embed → store
 ```
+
+**The engine is one package.** `rag/` holds everything that would still make
+sense if the Django app around it were replaced: it deals in questions,
+passages and vectors, and has never heard of a conversation, a quota or a
+request. Ingestion lives there too, with retrieval, because chunk size, overlap
+and the embedding model are the same decisions on both sides of the index — a
+change to one that is not matched in the other silently degrades every answer,
+and that is much harder to do by accident when they are neighbours.
+
+Each Django app keeps its own `services.py` for the rules that are about *this
+application*: who owns a document, what may be uploaded, what a conversation is
+allowed to search. `apps/chat/services.py` is the seam where the two meet.
 
 ## Why the layers exist
 

@@ -204,7 +204,7 @@ def _process_in_thread(document_id: str, user_id: int, file_path: str,
     import threading
 
     def _run() -> None:
-        from services.document_processor import generate_summary, process_document
+        from rag.ingestion.pipeline import generate_summary, process_document
 
         try:
             process_document(document_id, user_id, file_path, file_type)
@@ -364,17 +364,16 @@ def delete_document(user_id: int, document_id: str) -> None:
 
 
 def _delete_vector_index(user_id: int, document: dict[str, Any]) -> None:
-    if settings.VECTOR_BACKEND != 'faiss':
-        # pgvector stores vectors on the chunk rows, which the cascade removes.
-        return
     try:
-        from services.faiss_store import delete_index
+        from rag.registry import get_vector_store
 
-        delete_index(user_id, document['id'])
+        # No backend check: pgvector keeps vectors on the chunk rows that the
+        # cascade removes, so its delete is a no-op by design.
+        get_vector_store().delete(user_id, document['id'])
     except Exception as exc:
         # A stale index file is a leak, not a correctness problem — the document
         # is gone either way — so this is logged rather than raised.
-        logger.warning('Could not delete the FAISS index for %s: %s',
+        logger.warning('Could not delete the vector index for %s: %s',
                        document['id'], exc)
 
 
@@ -416,7 +415,7 @@ def regenerate_summary(user_id: int, document_id: str) -> None:
         return
 
     def _regenerate() -> None:
-        from services.document_processor import generate_summary
+        from rag.ingestion.pipeline import generate_summary
 
         try:
             generate_summary(document_id, user_id)
@@ -425,3 +424,49 @@ def regenerate_summary(user_id: int, document_id: str) -> None:
                          document_id, exc, exc_info=True)
 
     threading.Thread(target=_regenerate, daemon=True).start()
+
+
+# ══════════════════════════════════════════════════════════════════
+# Retrieval glue
+# ══════════════════════════════════════════════════════════════════
+#
+# The RAG package has no idea what a Document record is, and should not: it
+# searches "index keys" for a user. Turning stored documents into those keys is
+# this layer's job, and it lives here — with the documents — rather than in
+# chat, because the evaluation harness and the test_rag command need it without
+# there being a conversation anywhere.
+
+def resolve_index_keys(user_id: int, document_ids: list[str]) -> list[str]:
+    """Document ids -> the keys their vectors are stored under.
+
+    A document migrated out of MongoDB keeps its old id as the name of its
+    FAISS index file, so retrieval has to ask for that rather than the new
+    UUID. Documents that never finished processing are dropped: searching them
+    finds nothing, and including them would make a partial corpus look like a
+    retrieval failure.
+    """
+    documents = get_document_repository().list_completed(user_id, document_ids)
+    if not documents:
+        logger.info('No completed documents to search for user %s', user_id)
+        return []
+    return [d.get('legacy_mongo_id') or d['id'] for d in documents]
+
+
+def retrieve_relevant_chunks(user_id: int, document_ids: list[str],
+                             query: str) -> list[dict[str, Any]]:
+    """Passages most relevant to `query`, best first.
+
+    Returns dicts rather than Documents because the callers — the evaluation
+    harness and `manage.py test_rag` — score what comes back rather than
+    feeding it onward.
+    """
+    from rag.retrievers.vector import VectorRetriever
+    from rag.types import documents_to_chunks
+
+    index_keys = resolve_index_keys(user_id, document_ids)
+    if not index_keys:
+        return []
+
+    documents = VectorRetriever(user_id=user_id, document_keys=index_keys).invoke(query)
+    logger.info('Retrieved %d passage(s) for: %s', len(documents), query[:60])
+    return documents_to_chunks(documents)
