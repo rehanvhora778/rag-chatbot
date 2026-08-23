@@ -548,28 +548,9 @@ class TestAdminEndpoints:
             assert response.status_code == 403, f'{path} allowed a non-staff user'
 
     def test_an_admin_can(self, client, user):
-        """Needs MongoDB, because the admin panel has not been migrated.
-
-        Every other endpoint reads through ``repositories/`` and therefore works
-        under either PERSISTENCE_BACKEND. ``apps/admin_panel/views.py`` still
-        calls ``documents_col()`` and friends directly, so this endpoint is
-        MongoDB-only whatever the setting says — on a Postgres-only deployment
-        it returns 500, which is how this surfaced: it passed on a laptop
-        running Mongo and failed on a CI runner that has only Postgres.
-
-        Skipped rather than deleted, and skipped on the dependency rather than
-        the backend, so it keeps testing what it tests wherever Mongo exists —
-        and so the skip line names the real reason if anyone wonders why admin
-        coverage went quiet.
-        """
-        from tests.conftest import _mongo_available
-
-        if not _mongo_available():
-            pytest.skip(
-                'MongoDB is not reachable, and apps/admin_panel queries it '
-                'directly instead of going through repositories/.'
-            )
-
+        """No backend needed: the admin panel now reads through a query layer
+        that answers on either store. The parity assertions live in
+        tests/test_admin_panel.py."""
         user.is_staff = True
         user.save(update_fields=['is_staff'])
 
