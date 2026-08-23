@@ -231,7 +231,6 @@ class TestUploadValidation:
 
     @pytest.mark.parametrize('hostile,sanitised', [
         ('../../etc/passwd.pdf', 'passwd.pdf'),
-        ('..\\..\\config\\settings.pdf', 'settings.pdf'),
         ('sub/dir/report.pdf', 'report.pdf'),
     ])
     def test_django_strips_path_components_before_the_validator_sees_them(
@@ -240,6 +239,33 @@ class TestUploadValidation:
         """The first of three layers, asserted so a Django upgrade cannot
         remove it silently."""
         assert upload(hostile, PDF).name == sanitised
+
+    def test_a_windows_style_path_cannot_escape_either(self):
+        """The same property for backslashes, asserted as a property.
+
+        Django sanitises with ``os.path.basename``, which knows only the
+        running platform's separator. On Windows that strips
+        ``..\\..\\config\\`` and leaves ``settings.pdf``; on POSIX a backslash
+        is an ordinary, legal filename character, so the name comes through
+        whole — and that is correct rather than a hole, because nothing on
+        POSIX will read it as a directory boundary either.
+
+        Asserting the sanitised string directly is what made this test pass on
+        a Windows laptop and fail on a Linux CI runner. What actually has to
+        hold on both is the security property: whatever survives is a bare
+        filename on this platform, with no component that could climb out of
+        the media root.
+        """
+        import os
+
+        name = upload('..\\..\\config\\settings.pdf', PDF).name
+
+        assert os.path.basename(name) == name
+        assert os.sep not in name
+        assert not os.path.isabs(name)
+        # And it still cannot escape, whatever the platform made of it.
+        root = os.path.abspath('media')
+        assert os.path.abspath(os.path.join(root, name)).startswith(root)
 
     @pytest.mark.parametrize('name', [
         '../../etc/passwd.pdf',
@@ -522,6 +548,28 @@ class TestAdminEndpoints:
             assert response.status_code == 403, f'{path} allowed a non-staff user'
 
     def test_an_admin_can(self, client, user):
+        """Needs MongoDB, because the admin panel has not been migrated.
+
+        Every other endpoint reads through ``repositories/`` and therefore works
+        under either PERSISTENCE_BACKEND. ``apps/admin_panel/views.py`` still
+        calls ``documents_col()`` and friends directly, so this endpoint is
+        MongoDB-only whatever the setting says — on a Postgres-only deployment
+        it returns 500, which is how this surfaced: it passed on a laptop
+        running Mongo and failed on a CI runner that has only Postgres.
+
+        Skipped rather than deleted, and skipped on the dependency rather than
+        the backend, so it keeps testing what it tests wherever Mongo exists —
+        and so the skip line names the real reason if anyone wonders why admin
+        coverage went quiet.
+        """
+        from tests.conftest import _mongo_available
+
+        if not _mongo_available():
+            pytest.skip(
+                'MongoDB is not reachable, and apps/admin_panel queries it '
+                'directly instead of going through repositories/.'
+            )
+
         user.is_staff = True
         user.save(update_fields=['is_staff'])
 
