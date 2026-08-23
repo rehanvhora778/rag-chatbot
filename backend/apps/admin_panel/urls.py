@@ -1,11 +1,17 @@
 from django.urls import path
+
 from .views import (
-    AdminSystemStatsView, AdminUserListView, AdminUserDetailView,
-    AdminDocumentListView, AdminDocumentDetailView,
     AdminChatSessionListView,
+    AdminDocumentDetailView,
+    AdminDocumentListView,
+    AdminMetricsView,
+    AdminSystemStatsView,
+    AdminUserDetailView,
+    AdminUserListView,
 )
 
 urlpatterns = [
+    path('metrics/',                        AdminMetricsView.as_view(),        name='admin_metrics'),
     path('stats/',                          AdminSystemStatsView.as_view(),    name='admin_stats'),
     path('users/',                          AdminUserListView.as_view(),       name='admin_users'),
     path('users/<int:user_id>/',            AdminUserDetailView.as_view(),     name='admin_user_detail'),

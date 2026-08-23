@@ -12,10 +12,10 @@ so a code is only ever valid until the next send.
 """
 import logging
 import secrets
-from datetime import timedelta, timezone as dt_timezone
+from datetime import UTC, timedelta
 
 from django.conf import settings
-from django.contrib.auth.hashers import make_password, check_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.core.mail import send_mail
 from django.utils import timezone
 from pymongo import ASCENDING, ReturnDocument
@@ -70,7 +70,7 @@ def _aware(value):
     """
     if value is None:
         return None
-    return timezone.make_aware(value, dt_timezone.utc) if timezone.is_naive(value) else value
+    return timezone.make_aware(value, UTC) if timezone.is_naive(value) else value
 
 
 def _generate_code() -> str:
@@ -122,7 +122,7 @@ def _send(email: str, code: str, purpose: str, name: str = '') -> None:
             'Could not send the verification email. Check the mail settings in backend/.env '
             'and try again.',
             status_code=503,
-        )
+        ) from exc
 
     # The console backend has already dumped the whole message to the log, so
     # this repeats nothing that is not there — it just makes the code greppable

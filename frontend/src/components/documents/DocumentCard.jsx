@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   FileText, FileType2, MoreVertical, Eye, MessageSquare,
-  Pencil, Trash2, CheckCircle, Clock, XCircle, Loader, AlertTriangle,
+  Pencil, Trash2, CheckCircle, Clock, XCircle, Loader, AlertTriangle, RefreshCw,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
@@ -20,7 +20,7 @@ const formatDate = iso => {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function ActionsMenu({ doc, onView, onChat, onRename, onDelete }) {
+function ActionsMenu({ doc, onView, onChat, onRename, onDelete, onReprocess }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -65,6 +65,15 @@ function ActionsMenu({ doc, onView, onChat, onRename, onDelete }) {
                 </button>
               </>
             )}
+            {/* Offered for a failed document, and for a completed one after a
+                chunking or embedding change. Not offered while it is already
+                queued or running — a second job on the same document would
+                just be redelivered work. */}
+            {onReprocess && doc.status !== 'pending' && doc.status !== 'processing' && (
+              <button role="menuitem" onClick={run(onReprocess)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-zinc-300 transition-colors hover:bg-primary-500/10 hover:text-primary-200">
+                <RefreshCw size={13} /> Reprocess
+              </button>
+            )}
             <button role="menuitem" onClick={run(onRename)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-zinc-300 transition-colors hover:bg-primary-500/10 hover:text-primary-200">
               <Pencil size={14} className="text-zinc-500" /> Rename
             </button>
@@ -90,7 +99,7 @@ function ActionsMenu({ doc, onView, onChat, onRename, onDelete }) {
  * part way down. The shimmer overlay carries its own rounded-2xl, so it still
  * stays inside the corners without the card clipping.
  */
-export default function DocumentCard({ doc, onView, onChat, onRename, onDelete, variants }) {
+export default function DocumentCard({ doc, onView, onChat, onRename, onDelete, onReprocess, variants }) {
   const meta = STATUS_META[doc.status] || STATUS_META.pending
   const StatusIcon = meta.icon
   const busy = doc.status === 'processing' || doc.status === 'pending'
@@ -115,7 +124,7 @@ export default function DocumentCard({ doc, onView, onChat, onRename, onDelete, 
             <StatusIcon size={11} className={doc.status === 'processing' ? 'animate-spin' : ''} />
             {meta.label}
           </span>
-          <ActionsMenu doc={doc} onView={onView} onChat={onChat} onRename={onRename} onDelete={onDelete} />
+          <ActionsMenu doc={doc} onView={onView} onChat={onChat} onRename={onRename} onDelete={onDelete} onReprocess={onReprocess} />
         </div>
       </div>
 

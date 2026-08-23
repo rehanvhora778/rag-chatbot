@@ -1,6 +1,8 @@
 import { useState, useEffect, memo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { User, Copy, Check } from 'lucide-react'
+import { User, Copy, Check, ThumbsUp, ThumbsDown } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { chatAPI } from '../../api/chat'
 import Logo from '../ui/Logo'
 import MarkdownRenderer from './MarkdownRenderer'
 import SourcesPanel from './SourcesPanel'
@@ -46,9 +48,10 @@ function UserAvatar() {
 /**
  * Types an already-complete answer out character by character.
  *
- * The chat API returns the full response in one shot (it is not a streaming
- * endpoint), so this is presentation only — it never changes what is shown, and
- * the text is always complete in the DOM by the time the caret disappears.
+ * Used for answers that arrive whole — the non-streaming /message/ endpoint,
+ * still used as a fallback — never for a live stream. Simulating a typing pace
+ * on top of real tokens would make the answer lag behind what the server has
+ * already sent, so streamed messages render exactly what has arrived.
  */
 function StreamingMarkdown({ content, onTick }) {
   const [shown, setShown] = useState('')
@@ -73,6 +76,100 @@ function StreamingMarkdown({ content, onTick }) {
     </div>
   )
 }
+
+/* Why an answer was unhelpful. Only shown after a thumbs-down, because every
+   option describes a way the answer was wrong — asking after a thumbs-up would
+   be asking the user to invent a complaint. */
+const REASONS = [
+  ['incorrect',     'Incorrect'],
+  ['irrelevant',    'Irrelevant sources'],
+  ['missing',       'Missing information'],
+  ['hallucination', 'Made something up'],
+  ['other',         'Other'],
+]
+
+function FeedbackButtons({ messageId }) {
+  const [rating, setRating] = useState(null)
+  const [askReason, setAskReason] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // Whatever verdict already exists, so reopening a conversation shows the
+  // rating the user gave rather than a blank pair of buttons.
+  useEffect(() => {
+    let live = true
+    chatAPI.getFeedback(messageId)
+      .then(res => { if (live && res.data.data) setRating(res.data.data.rating) })
+      .catch(() => { /* absent feedback is the normal case, not an error */ })
+    return () => { live = false }
+  }, [messageId])
+
+  const send = async (value, reason = '') => {
+    if (saving) return
+    setSaving(true)
+    // Optimistic: the button responds immediately and is reverted only if the
+    // request actually fails.
+    const previous = rating
+    setRating(value)
+    try {
+      await chatAPI.feedback(messageId, { rating: value, reason })
+      if (value === -1 && !reason) setAskReason(true)
+      else setAskReason(false)
+    } catch {
+      setRating(previous)
+      toast.error('Could not save that feedback.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const buttonClass = (active, tone) =>
+    `export-hide inline-flex items-center rounded-md p-1 transition-colors ${
+      active ? tone : 'text-zinc-500 hover:bg-primary-500/10 hover:text-primary-300'
+    }`
+
+  return (
+    <div className="flex items-center gap-0.5">
+      <button
+        onClick={() => send(1)}
+        aria-label="Helpful"
+        aria-pressed={rating === 1}
+        className={buttonClass(rating === 1, 'bg-success-500/15 text-success-400')}
+      >
+        <ThumbsUp size={11} />
+      </button>
+      <button
+        onClick={() => send(-1)}
+        aria-label="Not helpful"
+        aria-pressed={rating === -1}
+        className={buttonClass(rating === -1, 'bg-red-500/15 text-red-400')}
+      >
+        <ThumbsDown size={11} />
+      </button>
+
+      <AnimatePresence>
+        {askReason && (
+          <motion.div
+            initial={{ opacity: 0, x: -6 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0 }}
+            className="export-hide ml-1 flex flex-wrap items-center gap-1"
+          >
+            {REASONS.map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => send(-1, value)}
+                className="rounded-full border border-primary-500/25 px-2 py-0.5 text-[10px] text-zinc-400 transition-colors hover:border-primary-400/50 hover:text-primary-200"
+              >
+                {label}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
 
 function ChatMessage({ msg, scrollToBottom }) {
   const isUser = msg.role === 'user'
@@ -118,17 +215,35 @@ function ChatMessage({ msg, scrollToBottom }) {
           data-role="assistant"
           className="w-full min-w-0 rounded-2xl border border-primary-500/40 bg-ink-900/80 px-4 py-4 text-[14px] leading-relaxed shadow-[0_0_26px_rgba(212,175,55,0.10),0_8px_34px_rgba(0,0,0,0.5)] backdrop-blur-md sm:px-5"
         >
-          {msg._animate
-            ? <StreamingMarkdown content={msg.content} onTick={scrollToBottom} />
-            : <MarkdownRenderer content={msg.content} />}
+          {/* Three cases, in order of how the text arrives:
+              _streaming — tokens are landing now, so render exactly what has
+                           arrived plus a caret. No simulated typing: the real
+                           pace is the model's, and faking it on top would make
+                           the answer lag behind what the server already sent.
+              _animate   — a completed answer being replayed for effect.
+              otherwise  — history, rendered immediately. */}
+          {msg._streaming ? (
+            <div className="relative">
+              <MarkdownRenderer content={msg.content} />
+              <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-blink rounded-sm bg-primary-400 align-middle" />
+            </div>
+          ) : msg._animate ? (
+            <StreamingMarkdown content={msg.content} onTick={scrollToBottom} />
+          ) : (
+            <MarkdownRenderer content={msg.content} />
+          )}
 
-          {/* Citations. The API returns these on every grounded answer — an
-              answer with no qualifying context correctly has none. */}
+          {/* Citations. Streamed ahead of the first token, so Sources appear
+              while the answer is still being written rather than making the
+              layout jump when they arrive at the end. */}
           <SourcesPanel sources={sources} />
         </div>
 
         <div className="flex items-center gap-1 px-1">
           <CopyButton text={msg.content} />
+          {/* Only once the turn is saved: feedback attaches to a stored
+              message, and until `done` arrives there is no id to attach to. */}
+          {msg.id && !msg._streaming && <FeedbackButtons messageId={msg.id} />}
           <span className="text-[10px] text-zinc-600">
             {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
           </span>

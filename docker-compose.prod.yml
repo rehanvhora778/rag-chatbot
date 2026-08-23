@@ -1,0 +1,143 @@
+# ============================================================
+# Production-shaped stack
+# ============================================================
+#   docker compose -f docker-compose.prod.yml up --build -d
+#
+# Differences from docker-compose.yml, all deliberate:
+#   * production image targets — gunicorn instead of runserver, nginx instead
+#     of the Vite dev server
+#   * no source bind-mounts — the image is the artifact
+#   * no host port on postgres/redis — they are reachable only on the internal
+#     network, so a laptop on the same wifi cannot open a psql session
+#   * every secret comes from the environment, with no default to fall back on
+#
+# This runs the production topology locally. A real deployment would also want
+# TLS termination, off-host backups, and a managed database.
+
+name: ragchatbot-prod
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-ragchatbot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-ragchatbot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server --appendonly yes
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      --maxmemory 512mb --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  api:
+    build:
+      context: ./backend
+      target: production
+    environment: &backend_env
+      DJANGO_ENV: production
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?ALLOWED_HOSTS is required}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ragchatbot}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      PERSISTENCE_BACKEND: ${PERSISTENCE_BACKEND:-postgres}
+      VECTOR_BACKEND: ${VECTOR_BACKEND:-pgvector}
+      CACHE_ENABLED: "True"
+      EMBEDDING_BACKEND: onnx
+      EMBEDDING_ONNX_PROVIDER: cpu
+      EMBEDDING_PRELOAD: "False"
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      GROQ_API_KEY: ${GROQ_API_KEY:?GROQ_API_KEY is required}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-RAG Chatbot <no-reply@localhost>}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
+    command: >
+      sh -c "python manage.py migrate --no-input &&
+             python manage.py create_admin --skip-if-unset &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000
+             --workers 1 --threads 4 --timeout 180
+             --access-logfile - --error-logfile -"
+    volumes:
+      - media_data:/app/media
+      - index_data:/app/indexes
+      - hf_cache:/home/appuser/.cache/huggingface
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+
+  worker:
+    build:
+      context: ./backend
+      target: production
+    command: celery -A config worker --loglevel=info --concurrency=${WORKER_CONCURRENCY:-2}
+    environment: *backend_env
+    volumes:
+      - media_data:/app/media
+      - index_data:/app/indexes
+      - hf_cache:/home/appuser/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+
+  beat:
+    build:
+      context: ./backend
+      target: production
+    command: celery -A config beat --loglevel=info
+    environment: *backend_env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+      args:
+        # Build-time, not run-time: Vite bakes these into the bundle.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:?VITE_API_BASE_URL is required}
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - api
+    restart: always
+
+volumes:
+  postgres_data:
+  redis_data:
+  media_data:
+  index_data:
+  hf_cache:

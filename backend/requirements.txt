@@ -16,6 +16,17 @@ google-auth==2.35.0
 # depend on what else happened to be installed. Declared explicitly so it does not.
 requests==2.34.2
 
+# Database — PostgreSQL + pgvector (the target store). psycopg 3 is what
+# Django 4.2 uses when both are installed. dj-database-url parses DATABASE_URL.
+psycopg[binary]==3.2.3
+pgvector==0.3.6
+dj-database-url==2.3.0
+
+# Background processing — document ingestion runs on a Celery worker instead of
+# a daemon thread inside the web process.
+celery[redis]==5.4.0
+redis==5.2.1
+
 # MongoDB
 pymongo[srv]==4.8.0
 dnspython==2.6.1
@@ -28,6 +39,14 @@ PyMuPDF==1.24.9
 python-docx==1.1.2
 chardet==5.2.0
 filetype==1.2.0
+
+# RAG framework interfaces. langchain-core ONLY — the Document, Embeddings,
+# BaseRetriever and prompt-template interfaces, which make this project's
+# components compose with off-the-shelf ones. The langchain and
+# langchain-community packages are deliberately not installed: their
+# implementations would replace working code, and RecursiveCharacterTextSplitter
+# in particular loses the page numbers every citation in this product depends on.
+langchain-core==0.3.15
 
 # ML / Embeddings / Vector Search
 sentence-transformers==3.1.1

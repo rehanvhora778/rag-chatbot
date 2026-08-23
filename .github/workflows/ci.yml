@@ -1,0 +1,226 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to the same branch makes the previous run irrelevant; cancel it
+# rather than paying for both.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  # ============================================================
+  backend-lint:
+    name: Backend · lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install ruff
+        run: pip install ruff==0.7.4
+
+      - name: Lint
+        working-directory: backend
+        run: ruff check . --output-format=github
+
+      # No `ruff format --check` on purpose. This codebase aligns assignments
+      # into columns in settings, URL tables and Mongo documents, which the
+      # formatter would collapse. That is a large diff with no defect fixed in
+      # it, so correctness rules are enforced and layout is left alone.
+
+  # ============================================================
+  backend-test:
+    name: Backend · test
+    runs-on: ubuntu-latest
+
+    services:
+      # pgvector, not plain postgres: the vector columns and the hybrid-search
+      # tests need the extension to exist.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: raguser
+          POSTGRES_PASSWORD: ragpass
+          POSTGRES_DB: ragchatbot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U raguser -d ragchatbot_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      DATABASE_URL: postgresql://raguser:ragpass@localhost:5432/ragchatbot_test
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: ci-only-secret-key-not-used-anywhere-real
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        # requirements-prod, not requirements: the full file pulls PyTorch via
+        # sentence-transformers (~800 MB) for a fallback backend the tests never
+        # exercise. The prod file has the ONNX path, which is what runs.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-prod.txt -r requirements-dev.txt
+
+      - name: Enable pgvector extension
+        run: |
+          PGPASSWORD=ragpass psql -h localhost -U raguser -d ragchatbot_test \
+            -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+            -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;" \
+            -c "CREATE EXTENSION IF NOT EXISTS unaccent;"
+
+      - name: Check for missing migrations
+        working-directory: backend
+        # Fails when a model was edited but `makemigrations` was never run —
+        # the mistake that deploys fine and then breaks on the next machine.
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Django deployment checks
+        working-directory: backend
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.production
+          SECRET_KEY: a-long-random-key-for-the-check-only-0123456789abcdef
+          ALLOWED_HOSTS: api.example.com
+          DATABASE_URL: postgresql://raguser:ragpass@localhost:5432/ragchatbot_test
+        run: python manage.py check --deploy --fail-level WARNING
+
+      - name: Run tests
+        working-directory: backend
+        run: pytest --cov --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          if-no-files-found: ignore
+
+  # ============================================================
+  frontend:
+    name: Frontend · test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Test
+        working-directory: frontend
+        run: npm test
+
+      - name: Build
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: http://localhost:8000
+        run: npm run build
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  # ============================================================
+  security:
+    name: Security · dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Audit Python dependencies
+        working-directory: backend
+        # Advisory, not blocking: a transitive CVE with no fixed version
+        # available should surface in the log, not wedge every pull request.
+        continue-on-error: true
+        run: |
+          pip install pip-audit==2.7.3
+          pip-audit -r requirements-prod.txt --desc
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Audit npm dependencies
+        working-directory: frontend
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+  # ============================================================
+  docker:
+    name: Docker · build images
+    runs-on: ubuntu-latest
+    # Images are slow to build; only prove they still build on the way into main.
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build backend (production target)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          target: production
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend (production target)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          target: production
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

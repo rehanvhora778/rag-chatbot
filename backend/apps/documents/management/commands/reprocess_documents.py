@@ -18,7 +18,7 @@ from bson import ObjectId
 from django.core.management.base import BaseCommand, CommandError
 
 from core.mongo import documents_col
-from services.document_processor import process_document
+from rag.ingestion.pipeline import process_document
 
 
 class Command(BaseCommand):
@@ -37,8 +37,8 @@ class Command(BaseCommand):
         if opts['document']:
             try:
                 query['_id'] = ObjectId(opts['document'])
-            except Exception:
-                raise CommandError(f"Invalid document id: {opts['document']}")
+            except Exception as exc:
+                raise CommandError(f"Invalid document id: {opts['document']}") from exc
         if opts['user'] is not None:
             query['user_id'] = opts['user']
 

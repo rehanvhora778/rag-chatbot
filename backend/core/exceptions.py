@@ -1,9 +1,10 @@
 import logging
+
 from django.conf import settings
-from rest_framework.views import exception_handler
-from rest_framework.response import Response
-from rest_framework import status
 from pymongo.errors import PyMongoError
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import exception_handler
 
 logger = logging.getLogger(__name__)
 

@@ -1,9 +1,20 @@
 from django.urls import path
+
 from .views import (
-    RegisterView, RegisterVerifyView, RegisterResendView,
-    LoginView, AdminLoginView, GoogleLoginView, GoogleConfigView,
-    PasswordResetRequestView, PasswordResetVerifyView, PasswordResetConfirmView,
-    LogoutView, ProfileView, ChangePasswordView, CustomTokenRefreshView,
+    AdminLoginView,
+    ChangePasswordView,
+    CustomTokenRefreshView,
+    GoogleConfigView,
+    GoogleLoginView,
+    LoginView,
+    LogoutView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
+    PasswordResetVerifyView,
+    ProfileView,
+    RegisterResendView,
+    RegisterVerifyView,
+    RegisterView,
 )
 
 urlpatterns = [

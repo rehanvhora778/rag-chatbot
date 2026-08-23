@@ -1,10 +1,11 @@
 import logging
 from typing import Optional
-from pymongo import MongoClient, ASCENDING, DESCENDING
+
+from django.conf import settings
+from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
-from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +63,11 @@ def messages_col() -> Collection:
 def analytics_col() -> Collection:
     return get_collection(settings.MONGO_COLLECTIONS['ANALYTICS'])
 
-def summaries_col() -> Collection:
-    return get_collection(settings.MONGO_COLLECTIONS['DOCUMENT_SUMMARIES'])
-
 def otps_col() -> Collection:
     return get_collection(settings.MONGO_COLLECTIONS['OTPS'])
+
+def feedback_col() -> Collection:
+    return get_collection(settings.MONGO_COLLECTIONS['FEEDBACK'])
 
 
 def create_indexes() -> None:
@@ -86,6 +87,10 @@ def create_indexes() -> None:
         messages_col().create_index([('session_id', ASCENDING)])
         messages_col().create_index([('created_at', ASCENDING)])
         messages_col().create_index([('content', 'text')])
+
+        # One verdict per message: rating again updates rather than stacking.
+        feedback_col().create_index([('message_id', ASCENDING)], unique=True)
+        feedback_col().create_index([('rating', ASCENDING), ('created_at', DESCENDING)])
 
         analytics_col().create_index([('user_id', ASCENDING)])
         analytics_col().create_index([('created_at', DESCENDING)])

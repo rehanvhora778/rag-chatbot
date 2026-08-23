@@ -1,0 +1,84 @@
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py", "*_test.py"]
+testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--tb=short",
+    "-ra",
+]
+markers = [
+    "integration: needs a real PostgreSQL with pgvector (skipped on SQLite)",
+    "slow: loads an ML model or otherwise takes seconds",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:xhtml2pdf.*",
+    "ignore::DeprecationWarning:reportlab.*",
+]
+
+[tool.coverage.run]
+source = ["apps", "core", "rag", "repositories"]
+omit = [
+    "*/migrations/*",
+    "*/tests/*",
+    "*/__pycache__/*",
+    "config/*",
+    "manage.py",
+]
+
+[tool.coverage.report]
+skip_covered = false
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    "migrations",
+    ".venv",
+    "venv",
+    "staticfiles",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # import sorting
+    "B",    # bugbear — mutable defaults, unused loop vars, ...
+    "UP",   # pyupgrade
+    "DJ",   # Django-specific checks
+    "S",    # bandit security checks
+    "C4",   # comprehension simplifications
+]
+ignore = [
+    "E501",   # line length is handled by the formatter, not as an error
+    "B008",   # function call in default arg — normal in DRF/Django signatures
+    "S101",   # assert — fine in tests
+    "DJ001",  # null=True on CharField — deliberate in a few nullable text columns
+
+    # --- Typing style, deliberately not enforced ---
+    # The codebase consistently uses typing.List / Dict / Optional. Rewriting
+    # ~90 annotations to PEP 585/604 spelling changes no behaviour and would
+    # bury the real changes in this refactor under a mechanical diff. The style
+    # is consistent, which is what actually matters.
+    "UP006",  # typing.List -> list
+    "UP007",  # Optional[X] -> X | None
+    "UP035",  # deprecated typing imports
+
+    "E701",   # `if x: return` on one line — used deliberately for short guards
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Settings modules legitimately star-import and reference names from base.
+"config/settings/*.py" = ["F401", "F403", "F405"]
+# Tests may use hardcoded passwords and asserts.
+"tests/*" = ["S105", "S106", "S107"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "core", "rag", "repositories", "config"]

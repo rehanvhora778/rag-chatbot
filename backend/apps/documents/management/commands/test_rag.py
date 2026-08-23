@@ -16,9 +16,10 @@ Usage:
 from bson import ObjectId
 from django.core.management.base import BaseCommand, CommandError
 
+from apps.documents.services import retrieve_relevant_chunks
 from core.mongo import chat_sessions_col
-from services.rag_pipeline import retrieve_relevant_chunks
-from services.llm import generate_rag_response, REFUSAL_MESSAGE
+from rag.chains.rag_chain import generate_from_chunks
+from rag.prompts.grounding import REFUSAL_MESSAGE
 
 DEFAULT_QUESTIONS = [
     "What are embeddings?",
@@ -66,8 +67,8 @@ class Command(BaseCommand):
         if opts['session']:
             try:
                 session = chat_sessions_col().find_one({'_id': ObjectId(opts['session'])})
-            except Exception:
-                raise CommandError(f"Invalid session id: {opts['session']}")
+            except Exception as exc:
+                raise CommandError(f"Invalid session id: {opts['session']}") from exc
             if not session:
                 raise CommandError("Session not found.")
             return session['user_id'], session.get('document_ids', [])
@@ -82,7 +83,7 @@ class Command(BaseCommand):
         top = max((c['similarity_score'] for c in chunks), default=0.0)
 
         if chunks:
-            answer = generate_rag_response(question, chunks, [])
+            answer = generate_from_chunks(question, chunks, [])
         else:
             answer = REFUSAL_MESSAGE
 

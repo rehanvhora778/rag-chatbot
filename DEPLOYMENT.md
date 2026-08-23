@@ -1,5 +1,90 @@
 # Deploying the AI RAG Chatbot
 
+There are two supported ways to run this, and which you want depends on whether
+you need the hybrid retrieval features.
+
+| | Docker Compose | Managed services |
+|---|---|---|
+| Store | PostgreSQL 16 + pgvector | MongoDB Atlas |
+| Hybrid retrieval | **yes** | no — needs PostgreSQL full-text |
+| Reranking | yes | no — image excludes PyTorch |
+| Background worker | yes | no — falls back to a thread |
+| Cost | your own host | free tiers |
+| Setup | one command | three services to wire together |
+
+The managed-services route is documented in full below and is what
+`render.yaml` describes. The Docker route is newer and is what the measured
+retrieval numbers in the README were produced on.
+
+---
+
+## Option A — Docker Compose
+
+```bash
+cp .env.docker.example .env      # set GROQ_API_KEY and POSTGRES_PASSWORD
+docker compose up --build
+```
+
+Brings up PostgreSQL with pgvector, Redis, the API, a Celery worker, beat, and
+the frontend. Migrations run on start.
+
+```bash
+docker compose exec api python manage.py create_admin --generate-password
+```
+
+For a production-shaped stack — gunicorn instead of runserver, nginx instead of
+the Vite dev server, no host ports on the database, and every secret required
+rather than defaulted:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+It refuses to start without `SECRET_KEY`, `ALLOWED_HOSTS`,
+`CORS_ALLOWED_ORIGINS`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `GROQ_API_KEY`
+and `VITE_API_BASE_URL`. That is deliberate: a stack that boots with defaults is
+a stack that gets deployed with them.
+
+`VITE_API_BASE_URL` is a **build argument**, not a runtime variable — Vite bakes
+it into the bundle, so changing it means rebuilding the frontend image rather
+than restarting the container.
+
+### Turning hybrid retrieval on
+
+```bash
+PERSISTENCE_BACKEND=postgres
+VECTOR_BACKEND=pgvector
+RAG_HYBRID_ENABLED=True
+RAG_RERANK_ENABLED=True      # needs requirements.txt, not requirements-prod.txt
+RAG_TOP_K=3
+```
+
+A system check refuses to start if these are inconsistent — hybrid retrieval
+without PostgreSQL would silently degrade to vector-only, which is exactly the
+kind of thing that goes unnoticed.
+
+### Migrating an existing MongoDB deployment
+
+```bash
+docker compose exec api python manage.py migrate_from_mongo --dry-run     --users-from-sqlite db.sqlite3
+docker compose exec api python manage.py migrate_from_mongo     --users-from-sqlite db.sqlite3
+```
+
+Re-runnable, so rehearse it first. Users come from the SQLite file with their
+primary keys and password hashes intact — every Mongo record references a user
+by the id those tables issued.
+
+Chunks written before vector persistence have text but no embedding. The command
+reports how many, and they need `reprocess_documents` before they are visible to
+vector search.
+
+Keep `PERSISTENCE_BACKEND=mongo` until you have verified the copy, then switch.
+Both implementations stay live and are covered by the same test suite.
+
+---
+
+## Option B — Managed services (Render + Atlas + Vercel)
+
 Three free services, each doing the thing it is best at:
 
 | Piece | Platform | Free tier |

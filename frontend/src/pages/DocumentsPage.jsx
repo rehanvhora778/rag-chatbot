@@ -160,6 +160,21 @@ export default function DocumentsPage() {
 
   /* ── Derived list ── */
   const q = query.trim().toLowerCase()
+  /* Re-run ingestion. The status flips back to pending immediately so the
+     existing poll picks it up, rather than the card looking inert until the
+     next refresh. */
+  const reprocessDoc = async (doc) => {
+    try {
+      await documentsAPI.reprocess(doc.id)
+      setDocs(list => list.map(d => (
+        d.id === doc.id ? { ...d, status: 'pending', error_message: '' } : d
+      )))
+      toast.success(`“${doc.original_filename}” queued for reprocessing.`)
+    } catch (err) {
+      toast.error(friendlyError(err, 'Could not queue that document.'))
+    }
+  }
+
   const visible = docs
     .filter(d => (statusFilter === 'all' ? true : d.status === statusFilter))
     .filter(d => (q ? (d.original_filename || '').toLowerCase().includes(q) : true))
@@ -297,6 +312,7 @@ export default function DocumentsPage() {
                 onChat={chatWithDoc}
                 onRename={d => { setRenaming(d); setRenameValue(d.original_filename) }}
                 onDelete={setConfirmDelete}
+                onReprocess={reprocessDoc}
               />
             ))}
           </AnimatePresence>
