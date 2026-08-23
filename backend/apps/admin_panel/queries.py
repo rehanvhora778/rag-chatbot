@@ -25,6 +25,8 @@ from typing import Any, Optional, Protocol
 from django.conf import settings
 from django.utils import timezone
 
+from core.utils import day_windows
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,27 +67,6 @@ class AdminQueries(Protocol):
     def purge_user(self, user_id: int) -> None:
         """Remove everything belonging to one user, before the account goes."""
         ...
-
-
-# ══════════════════════════════════════════════════════════════════
-# Shared helpers
-# ══════════════════════════════════════════════════════════════════
-
-def _day_windows(days: int) -> list[tuple[Any, Any, str]]:
-    """(start, end, label) for each of the last `days` days, oldest first.
-
-    Shared so both backends bucket by the same boundaries. Two implementations
-    of "midnight" is two chances for the graphs to disagree about which day a
-    late-evening query belongs to.
-    """
-    now = timezone.now()
-    windows = []
-    for offset in range(days - 1, -1, -1):
-        start = (now - timedelta(days=offset)).replace(
-            hour=0, minute=0, second=0, microsecond=0,
-        )
-        windows.append((start, start + timedelta(days=1), start.strftime('%b %d')))
-    return windows
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -136,7 +117,7 @@ class PostgresAdminQueries:
     def daily_active_users(self, days: int) -> list[dict[str, Any]]:
         from apps.analytics.models import AnalyticsEvent
 
-        windows = _day_windows(days)
+        windows = day_windows(days)
         oldest = windows[0][0]
 
         # Pulled in one query and bucketed in Python. A DATE_TRUNC group-by
@@ -157,7 +138,7 @@ class PostgresAdminQueries:
     def queries_per_day(self, days: int) -> list[dict[str, Any]]:
         from apps.chat.models import Message
 
-        windows = _day_windows(days)
+        windows = day_windows(days)
         stamps = list(
             Message.objects
             .filter(role='user', created_at__gte=windows[0][0])
@@ -290,6 +271,16 @@ class PostgresAdminQueries:
         # the two backends behaving the same and survives on_delete changes.
         Document.objects.filter(owner_id=user_id).delete()
         Conversation.objects.filter(owner_id=user_id).delete()
+
+        # Events are deleted rather than left to AnalyticsEvent's SET_NULL,
+        # and that is a real disagreement worth naming: the model argues for
+        # keeping detached events because "N uploads happened last Tuesday" is
+        # not personal data once the name is gone. Against that, the MongoDB
+        # path has always deleted them and this endpoint tells the operator
+        # "User and all data deleted". Two backends answering that promise
+        # differently is the worse outcome, so both delete. Change this only by
+        # changing both, and reword the endpoint if the answer becomes "kept,
+        # anonymised".
         AnalyticsEvent.objects.filter(user_id=user_id).delete()
 
 
@@ -339,7 +330,7 @@ class MongoAdminQueries:
             {'date': label,
              'users': len(col.distinct('user_id',
                                        {'created_at': {'$gte': start, '$lt': end}}))}
-            for start, end, label in _day_windows(days)
+            for start, end, label in day_windows(days)
         ]
 
     def queries_per_day(self, days: int) -> list[dict[str, Any]]:
@@ -351,7 +342,7 @@ class MongoAdminQueries:
              'queries': col.count_documents({
                  'role': 'user', 'created_at': {'$gte': start, '$lt': end},
              })}
-            for start, end, label in _day_windows(days)
+            for start, end, label in day_windows(days)
         ]
 
     def per_user_counts(self, user_ids: list[int]) -> dict[int, dict[str, int]]:
