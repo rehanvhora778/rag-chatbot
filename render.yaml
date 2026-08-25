@@ -58,11 +58,28 @@ services:
         generateValue: true          # Render generates a strong random value
 
       # PostgreSQL 16 + pgvector, from Neon: https://console.neon.tech
-      # Use the POOLED connection string (the host contains `-pooler`) and keep
-      # the `?sslmode=require` Neon puts on the end. Neon suspends an idle
-      # compute after five minutes; `conn_health_checks` is already on in
-      # settings, so Django notices a connection that died in the meantime and
-      # reconnects instead of raising on the first query after a quiet period.
+      #
+      # Use the DIRECT connection string — the one WITHOUT `-pooler` in the
+      # host — and keep the `?sslmode=require` Neon puts on the end.
+      #
+      # The pooled endpoint is the wrong choice for this stack, which is not
+      # the obvious answer. Django 4.2 talks to PostgreSQL through psycopg 3,
+      # which promotes a query to a server-side prepared statement after five
+      # executions. Neon's pooler is pgBouncer in transaction mode, where
+      # consecutive queries from one Django connection can land on different
+      # server connections — so the prepared statement is missing, or the name
+      # collides with one another session left behind. It fails intermittently,
+      # under load, with `prepared statement "_pg3_0" already exists`, which
+      # reads like a Django bug rather than a pooling one.
+      #
+      # Nothing here sets `prepare_threshold: None` to defuse that, and there
+      # is no reason to: this service runs one gunicorn worker with four
+      # threads, so it holds about four connections against a limit of a
+      # hundred. Pooling solves a problem this deployment does not have.
+      #
+      # Neon suspends an idle compute after five minutes. `conn_health_checks`
+      # is already on in settings, so Django replaces a connection that died
+      # during the pause instead of raising on the first query after it.
       - key: DATABASE_URL
         sync: false
 

@@ -154,19 +154,34 @@ Have these ready:
 2. **Create a project** — Postgres 16, region near your Render region (`AWS
    us-west-2` pairs well with Render's `oregon`; keeping them close matters
    more than either being close to you, because every query is server-to-server)
-3. On the dashboard, copy the connection string. **Take the pooled one** — the
-   host contains `-pooler`:
+3. On the dashboard, copy the connection string. **Take the direct one** — the
+   host must *not* contain `-pooler`:
 
    ```
-   postgresql://user:pass@ep-xxx-pooler.us-west-2.aws.neon.tech/neondb?sslmode=require
+   postgresql://user:pass@ep-xxx.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require
    ```
 
    Keep `?sslmode=require` on the end. Neon refuses unencrypted connections and
    `dj_database_url` passes the parameter straight through to psycopg.
 
-   The pooled endpoint is the right one here because Render restarts the
-   instance freely and each restart abandons its connections; pgBouncer in
-   front of the database absorbs that.
+   **Why not the pooled endpoint**, which is usually the right default and is
+   not here. Django 4.2 talks to PostgreSQL through psycopg 3, which promotes a
+   query to a server-side prepared statement after five executions. Neon's
+   pooler is pgBouncer in transaction mode, where consecutive queries from one
+   Django connection can land on different server connections — so the prepared
+   statement is either missing or its name collides with one another session
+   left behind. The symptom is `prepared statement "_pg3_0" already exists`,
+   appearing intermittently and only under load, and reading like a Django bug
+   rather than a pooling one.
+
+   That is fixable — `'OPTIONS': {'prepare_threshold': None}` on the database
+   config — but it is not worth doing here. A free Render instance runs one
+   gunicorn worker with four threads, so it holds roughly four connections
+   against a limit of a hundred. Pooling solves a problem this deployment does
+   not have, at the cost of one that is genuinely hard to diagnose.
+
+   Add the option first if you ever scale the worker count up far enough to
+   need the pooler.
 
 4. You do **not** need to create tables, or run `CREATE EXTENSION vector`
    yourself. `build.sh` runs `manage.py migrate` on every deploy, and
