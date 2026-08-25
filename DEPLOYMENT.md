@@ -1,20 +1,21 @@
 # Deploying the AI RAG Chatbot
 
-There are two supported ways to run this, and which you want depends on whether
-you need the hybrid retrieval features.
+There are two supported ways to run this. Both give you the full stack —
+PostgreSQL + pgvector, hybrid retrieval, page-cited answers. They differ in who
+operates the database and whether ingestion gets a real worker.
 
 | | Docker Compose | Managed services |
 |---|---|---|
-| Store | PostgreSQL 16 + pgvector | MongoDB Atlas |
-| Hybrid retrieval | **yes** | no — needs PostgreSQL full-text |
-| Reranking | yes | no — image excludes PyTorch |
-| Background worker | yes | no — falls back to a thread |
-| Cost | your own host | free tiers |
+| Store | PostgreSQL 16 + pgvector | PostgreSQL 16 + pgvector (Neon) |
+| Hybrid retrieval | **yes** | **yes** |
+| Reranking | yes | no — 512 MB RAM cannot hold PyTorch |
+| Background worker | yes — Celery | no — falls back to a thread |
+| Cost | your own host | free |
 | Setup | one command | three services to wire together |
 
-The managed-services route is documented in full below and is what
-`render.yaml` describes. The Docker route is newer and is what the measured
-retrieval numbers in the README were produced on.
+The managed route is what `render.yaml` describes and what the live demo runs.
+The Docker route is what the measured retrieval numbers in the README were
+produced on, because it is the one that can afford the cross-encoder.
 
 ---
 
@@ -83,32 +84,45 @@ Both implementations stay live and are covered by the same test suite.
 
 ---
 
-## Option B — Managed services (Render + Atlas + Vercel)
+## Option B — Managed services (Neon + Render + Vercel)
 
 Three free services, each doing the thing it is best at:
 
 | Piece | Platform | Free tier |
 |---|---|---|
-| Database (documents, chunks, chats, users' OTPs) | **MongoDB Atlas** | 512 MB, permanent |
-| Backend API (Django + FAISS + Groq) | **Render** | 512 MB RAM, sleeps when idle |
+| Database — documents, chunks, **vectors**, chats, users | **Neon** (PostgreSQL 16 + pgvector) | 0.5 GB, permanent |
+| Backend API (Django + ONNX + Groq) | **Render** | 512 MB RAM, sleeps when idle |
 | Frontend (React SPA) | **Vercel** | 100 GB bandwidth |
 
 ```
-Browser ──> Vercel (React)  ──HTTPS──>  Render (Django API)  ──>  MongoDB Atlas
+Browser ──> Vercel (React)  ──HTTPS──>  Render (Django API)  ──>  Neon (Postgres + pgvector)
                                               │
                                               └──>  Groq API (gpt-oss-120b)
 ```
 
+**Why Neon and not Render's own PostgreSQL.** Render's free database is deleted
+after 30 days. That is fine for a viva and wrong for a link on a CV, which is
+the whole point of keeping this deployed. Neon's free tier has no expiry, runs
+PostgreSQL 16, and allows the `vector` extension — the three things this
+project needs.
+
+**What the migration buys you here specifically.** On the old stack the free
+tier wiped `db.sqlite3` on every deploy, which meant every registered account
+disappeared. Django's auth tables now live in Neon with everything else, so
+**accounts survive restarts**. Only the original uploaded files in `media/` are
+still lost, and answers no longer depend on them — the chunks and their vectors
+are rows in the database.
+
 > **`GROQ_MODEL` is pinned in `render.yaml`.** Groq retires models without
 > notice and the failure is quiet: `llama-3.3-70b-versatile` began returning
 > `404 model_not_found`, which broke chat answers and left every document
-> summary reading *"Summary could not be generated."* No Llama chat model
-> remains on Groq. If answers start failing, check
-> [Groq's model list](https://console.groq.com/docs/models) first. Note that
-> `qwen/qwen3.6-27b` is available but unsuitable as the chat model — it emits
-> its `<think>` reasoning into the reply body; it is used only for vision OCR.
+> summary reading *"Summary could not be generated."* If answers start failing,
+> check [Groq's model list](https://console.groq.com/docs/models) first. Note
+> that `qwen/qwen3.6-27b` is available but unsuitable as the chat model — it
+> emits its `<think>` reasoning into the reply body; it is used only for vision
+> OCR.
 
-Deploy in this order — each step needs a URL from the one before it.
+Deploy in this order — each step needs a value from the one before it.
 
 ---
 
@@ -119,45 +133,47 @@ Have these ready:
 - The project pushed to a **GitHub** repository
 - A **Groq API key** — https://console.groq.com/keys
 
-> **OTP email does not work on Render's free tier, and no Gmail App Password
-> will fix it.** Free instances have no outbound SMTP: `smtp.gmail.com:587`
-> fails with `[Errno 101] Network is unreachable`. Leave `EMAIL_HOST_USER`
-> blank and Django falls back to the console backend, which prints the code
-> into the service log — search the Render logs for `OTP` and read it from
-> there. For real delivery you need either a paid instance (SMTP is allowed) or
-> an HTTP email API; `BREVO_API_KEY` is already wired up for the latter and
-> takes precedence over the SMTP settings when set.
+> **Rotate your keys first.** Anything that has been sitting in a local
+> `backend/.env` should be regenerated before it goes into a hosting dashboard.
+> `.env` is gitignored so it is not in your repo, but generate fresh values and
+> paste those into Render instead.
 
-> **Rotate your keys first.** The Groq key and Gmail App Password currently in
-> `backend/.env` have been sitting on disk. `.env` is gitignored so they are not
-> in your repo, but generate fresh ones before going public and paste those into
-> Render instead.
+> **OTP email does not work over SMTP on Render's free tier, and no Gmail App
+> Password will fix it.** Free instances have no outbound SMTP:
+> `smtp.gmail.com:587` fails with `[Errno 101] Network is unreachable`. Two
+> options that do work: set `BREVO_API_KEY`, which sends over HTTPS and takes
+> precedence over the SMTP settings; or leave the email variables blank, and
+> Django falls back to the console backend and prints the code into the service
+> log — search the Render logs for `OTP`.
 
 ---
 
-## Step 1 — MongoDB Atlas (the database)
+## Step 1 — Neon (the database)
 
-1. Sign up at https://www.mongodb.com/cloud/atlas/register
-2. **Create a cluster** → choose **M0 Free** → pick a region near you
-   (Mumbai `ap-south-1` if you are in India) → *Create Deployment*
-3. **Database Access** → *Add New Database User*
-   - Username: `ragchatbot`
-   - Password: *Autogenerate* → **copy it now**, you cannot see it again
-   - Role: *Read and write to any database*
-4. **Network Access** → *Add IP Address* → **Allow Access from Anywhere**
-   (`0.0.0.0/0`)
-
-   Render's free instances have no fixed outbound IP, so a narrower rule would
-   break every time the instance moves. The database user's password is what
-   actually protects the data.
-5. **Connect** → *Drivers* → *Python* → copy the connection string:
+1. Sign up at https://console.neon.tech
+2. **Create a project** — Postgres 16, region near your Render region (`AWS
+   us-west-2` pairs well with Render's `oregon`; keeping them close matters
+   more than either being close to you, because every query is server-to-server)
+3. On the dashboard, copy the connection string. **Take the pooled one** — the
+   host contains `-pooler`:
 
    ```
-   mongodb+srv://ragchatbot:<db_password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+   postgresql://user:pass@ep-xxx-pooler.us-west-2.aws.neon.tech/neondb?sslmode=require
    ```
 
-   Replace `<db_password>` with the password from step 3. Keep this — it is the
-   `MONGODB_HOST` value in the next step.
+   Keep `?sslmode=require` on the end. Neon refuses unencrypted connections and
+   `dj_database_url` passes the parameter straight through to psycopg.
+
+   The pooled endpoint is the right one here because Render restarts the
+   instance freely and each restart abandons its connections; pgBouncer in
+   front of the database absorbs that.
+
+4. You do **not** need to create tables, or run `CREATE EXTENSION vector`
+   yourself. `build.sh` runs `manage.py migrate` on every deploy, and
+   `apps/documents/migrations/0001_initial.py` starts with `VectorExtension()`
+   — `CREATE EXTENSION IF NOT EXISTS vector`, which is idempotent.
+
+Keep the connection string. It is `DATABASE_URL` in the next step.
 
 ---
 
@@ -167,25 +183,36 @@ Have these ready:
 2. **New +** → **Blueprint** → select your repository
 
    Render reads `render.yaml` from the repo root and configures the service.
-   (Prefer clicking through instead? **New +** → **Web Service**, set
-   *Root Directory* `backend`, *Build Command* `bash ./build.sh`, *Start Command*
-   `gunicorn config.wsgi:application --workers 1 --threads 4 --timeout 180`.)
+   (Prefer clicking through instead? **New +** → **Web Service**, set *Root
+   Directory* `backend`, *Build Command* `bash ./build.sh`, *Start Command*
+   `gunicorn config.wsgi:application --workers 1 --threads 4 --timeout 180`,
+   then add every variable marked `sync: false` in `render.yaml` by hand.)
+
 3. Render prompts for the secret environment variables. Fill them in:
 
    | Variable | Value |
    |---|---|
-   | `MONGODB_HOST` | the Atlas string from Step 1 |
+   | `DATABASE_URL` | the pooled Neon string from Step 1 |
    | `GROQ_API_KEY` | your Groq key |
-   | `EMAIL_HOST_USER` | **leave blank** — SMTP is blocked on the free tier, see the note above |
-   | `EMAIL_HOST_PASSWORD` | leave blank |
+   | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` for now — fixed in Step 4 |
    | `DEFAULT_ADMIN_EMAIL` | the admin account to create |
    | `DEFAULT_ADMIN_PASSWORD` | a strong password |
-   | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` for now — fixed in Step 4 |
+   | `BREVO_API_KEY` | for real OTP delivery, or leave blank |
+   | `EMAIL_HOST_USER` | **leave blank** — SMTP is blocked, see above |
+   | `EMAIL_HOST_PASSWORD` | leave blank |
 
-   `SECRET_KEY` is generated by Render. `DEBUG=False`, `EMBEDDING_BACKEND=onnx`
-   and `EMBEDDING_ONNX_PROVIDER=cpu` are already set in `render.yaml`.
+   `SECRET_KEY` is generated by Render. Everything that selects the upgraded
+   stack — `PERSISTENCE_BACKEND=postgres`, `VECTOR_BACKEND=pgvector`,
+   `RAG_HYBRID_ENABLED=True` — is already fixed in `render.yaml`.
+
+   **`MONGODB_HOST` is no longer needed.** Nothing reads it once
+   `PERSISTENCE_BACKEND=postgres`, and the Mongo client is created lazily, so
+   an absent value is never dialled. If you are keeping an Atlas cluster around
+   as a fallback, leaving the variable set does no harm.
+
 4. **Create** and watch the log. The first build takes **5–10 minutes** — it
    installs the ML packages and downloads the embedding model.
+
 5. When it says *Live*, test it:
 
    ```
@@ -195,11 +222,28 @@ Have these ready:
    You want:
 
    ```json
-   {"status": "healthy", "mongodb": "connected", "service": "AI RAG Chatbot API"}
+   {
+     "status": "healthy",
+     "service": "AI RAG Chatbot API",
+     "persistence": "postgres",
+     "vector_backend": "pgvector",
+     "hybrid_retrieval": true,
+     "reranking": false,
+     "database": "connected"
+   }
    ```
 
-   `"mongodb": "unavailable"` means Step 1 is wrong — check the password in the
-   connection string and that Network Access is `0.0.0.0/0`.
+   Read those middle three fields, not just `status`. They are the check that
+   the upgraded stack is what actually booted: all of them are derived from
+   whether `DATABASE_URL` parsed, so a typo in the connection string does not
+   crash the service — it quietly starts the *old* stack, which looks identical
+   from the UI until the first question comes back worse.
+
+   | What you see | What it means |
+   |---|---|
+   | `"persistence": "mongo"` | `DATABASE_URL` is unset or unparseable. Recheck it. |
+   | `"database": "unavailable"` | Neon is not reachable. Check the password and that `?sslmode=require` survived the paste. |
+   | `"database": "connected (pgvector missing)"` | Migrations did not run. Check the build log for the `migrate` step. |
 
 **Copy your backend URL.** You need it next.
 
@@ -222,8 +266,10 @@ Have these ready:
    | `VITE_API_BASE_URL` | `https://<your-service>.onrender.com` (no trailing slash) |
    | `VITE_GOOGLE_CLIENT_ID` | your Google OAuth client id, or leave blank |
 
-   These are baked in at build time, so **changing them later needs a redeploy**,
-   not just a restart.
+   These are baked into the bundle at build time, so **changing them later
+   needs a redeploy**, not just a restart. If you ever recreate the Render
+   service and it comes back on a different hostname, this is the variable that
+   has to change — and redeploying Vercel is what makes it take effect.
 5. **Deploy**, then copy your frontend URL (`https://<project>.vercel.app`).
 
 ---
@@ -254,7 +300,10 @@ that origin is allowed.
 3. Open your Vercel URL and check the whole flow:
    - Register → read the code from the Render log (search `OTP`) → account created
    - Upload a PDF → status reaches **Ready**
-   - Ask a question → answer comes back with `(Page N)` citations
+   - Ask a question → answer streams in with `(Page N)` citations
+   - Ask something the document does not cover → it should **refuse**
+   - Ask for an exact string in the document (a code, a revision number) —
+     this is the one hybrid retrieval added; on the old stack it failed
    - Sign in at `/admin-login` with your `DEFAULT_ADMIN_EMAIL`
 
 ---
@@ -268,55 +317,62 @@ wake it, which takes **around 50 seconds**. Open the site a minute before you
 present and it will be warm. (A cron ping every 10 minutes keeps it awake, but
 that burns your monthly instance hours.)
 
-**The disk is wiped on every deploy and restart.** This is the big one. Render's
-free tier has no persistent storage, and three things live on disk:
+**Neon suspends an idle compute after 5 minutes.** It wakes on the next
+connection, costing well under a second — and it almost never shows, because
+Render's own 50-second wake happens first and the database is already up by the
+time Django asks it anything. `conn_health_checks` is on in `settings.py`, so a
+connection that died during the pause is replaced rather than raising.
+
+**The disk is still wiped on every deploy and restart** — but this now costs
+much less than it did:
 
 | Lost on restart | Consequence |
 |---|---|
-| Uploaded PDFs (`media/`) | The original file is gone |
-| FAISS indexes (`indexes/`) | Rebuilt automatically — see below |
-| `db.sqlite3` — Django's user table | **Registered accounts are gone** |
+| Uploaded PDFs (`media/`) | The original file is gone; **answers still work** |
+| `indexes/` (FAISS) | Not used — vectors are rows in Neon |
+| Django's user table | **Not lost any more** — it is in Neon |
 
-MongoDB keeps every document record, chunk, and chat message, so the app does
-not break. Users must register again; the admin account survives because
-`build.sh` re-creates it on every deploy.
+Chunks, embeddings, chat history and accounts all live in PostgreSQL, so the
+only casualty is downloading the source file you uploaded. On the old stack
+this section was the worst thing about the free tier; the migration is most of
+the reason it no longer is.
 
-**The FAISS indexes repair themselves.** Losing them used to be the worst of
-these: the document still appeared in the sidebar marked "completed", but with
-no index there was nothing to retrieve, so *every* question came back "I could
-not find an answer to your question in the uploaded document(s)" — a refusal
-that looked like a broken model rather than a missing file. Each chunk's vector
-is now stored in MongoDB next to its text, and `faiss_store.rebuild_index`
-writes the index back from those vectors the first time a question touches a
-document whose index is gone. It is a copy, not a recompute, so it costs a
-second or so and the answer arrives normally.
+**Ingestion runs in a thread, not on a worker.** Render's background workers
+are paid-only, so `queue_processing` pings for a live Celery worker, finds
+none, logs that it is falling back, and processes the upload in a daemon
+thread. The failure mode is narrow but real: an instance restart *during*
+ingestion loses that one job, and the document stays at "processing". Re-upload
+it. `render.yaml` has the worker and Key Value blocks commented out ready to
+uncomment when there is a budget.
 
-Two things to know about it:
-- Documents uploaded *before* this change have no stored vectors, so their
-  first rebuild re-embeds the text instead. That is slow on a throttled free
-  instance and a large document can exceed the 180s request timeout. Re-upload
-  anything from before to move it onto the fast path.
-- The original PDF is still gone, so downloading the source file will not work
-  even though questions do.
+**512 MB RAM.** One gunicorn worker plus the ONNX embedding model fits, without
+much headroom. Do not raise `--workers` above 1 on the free plan, and leave
+`RAG_RERANK_ENABLED=False` — the cross-encoder needs PyTorch, which is ~520 MB
+on its own and is excluded from `requirements-prod.txt` for exactly that reason.
 
-For a viva demo this is usually fine: upload your PDF at the start of the
-session and everything works. To make it permanent, either
-- upgrade to Render **Starter ($7/mo)** and attach a **persistent disk**, mounted
-  at a path you set as `VOLUME_PATH` (settings.py already reads it), or
-- move Django's auth tables to a hosted Postgres (Neon and Supabase both have
-  permanent free tiers) so at least accounts survive.
-
-**512 MB RAM.** One gunicorn worker plus the embedding model fits, but not with
-much headroom. Do not raise `--workers` above 1 on the free plan.
+**Groq's free tier rate-limits** after roughly a hundred calls. That is also
+why `RAG_QUERY_REWRITE` is off: it spends an extra call per follow-up question,
+and a rate-limited rewrite costs you the answer, not just the rewrite.
 
 ---
 
 ## If something breaks
 
+**Health says `"persistence": "mongo"` on a deployment that should be Postgres**
+`DATABASE_URL` is unset, misspelled, or failed to parse. Every stack switch is
+derived from it, so this one variable being wrong silently reverts the whole
+deployment to the old behaviour. Check it in the Render dashboard first.
+
+**Health says `"database": "connected (pgvector missing)"`**
+The connection works but `CREATE EXTENSION vector` never ran. Almost always a
+build where `migrate` failed or was skipped — read the build log. On Neon the
+extension is allowed by default; on a managed Postgres that forbids it, no
+amount of retrying will help and you need a provider that permits pgvector.
+
 **Build fails with `permission denied: ./build.sh`**
-`render.yaml` already uses `bash ./build.sh` to avoid this. If you configured the
-service by hand, set the build command to `bash ./build.sh` too — git on Windows
-does not carry the executable bit.
+`render.yaml` already uses `bash ./build.sh` to avoid this. If you configured
+the service by hand, set the build command to `bash ./build.sh` too — git on
+Windows does not carry the executable bit.
 
 **Build runs out of memory or times out**
 Confirm the build is installing `requirements-prod.txt`, not `requirements.txt`.
@@ -336,28 +392,26 @@ include the scheme and have no trailing slash.
 `frontend/vercel.json` is missing or the Root Directory is not set to `frontend`.
 
 **OTP email never arrives**
-`EMAIL_HOST_USER` is blank, so Django is using the console backend and printing
-the code into the Render log instead of sending it. Set both email variables. It
-must be a Gmail *App Password*, not your account password.
+Set `BREVO_API_KEY` — SMTP does not work on a free instance whatever you put in
+`EMAIL_HOST_USER`. Without either, Django uses the console backend and prints
+the code into the Render log.
 
 **First question after a deploy is very slow**
-Expected. The instance is waking and loading the embedding model. Subsequent
-questions are fast.
+Expected. The instance is waking and loading the embedding model lazily
+(`EMBEDDING_PRELOAD=false`, which is deliberate — preloading deadlocks the
+upload path). Subsequent questions are fast.
 
-**Every answer is "I could not find an answer to your question in the uploaded
-document(s)"**
-The document is listed and marked completed, but its FAISS index was wiped by a
-restart, so retrieval returns nothing and the pipeline refuses rather than
-guessing. This now repairs itself — the index is rebuilt from the vectors kept
-in MongoDB on the next question. If you still see it, check the Render log for
-`Rebuilding lost FAISS index`:
-- `no chunks in MongoDB` means processing never finished for that document —
-  upload it again.
-- A rebuild that starts but never logs `Rebuilt index` is the slow re-embedding
-  path on a document uploaded before vectors were stored. Re-upload it.
-- No rebuild line at all means the index is present and the documents genuinely
-  do not contain the answer. Confirm with `RAG_DEBUG=true`, which returns the
-  retrieved passages and their similarity scores with the answer.
+**A document sits at "processing" forever**
+The instance restarted mid-ingest and the thread went with it. Re-upload.
+This is the failure a Celery worker exists to remove; see the commented blocks
+in `render.yaml`.
+
+**Every answer is "I could not find an answer"**
+On this stack that means retrieval genuinely returned nothing — the vectors are
+in the database, so the old "the index file was wiped" cause is gone. Check
+that the document reached **Ready** rather than "processing", then confirm with
+`RAG_DEBUG=true`, which returns the retrieved passages and their similarity
+scores alongside the answer.
 
 ---
 
@@ -372,4 +426,8 @@ git push
 ```
 
 Render rebuilds the API (a few minutes); Vercel rebuilds the frontend (under a
-minute). Remember that the Render disk is wiped by this — see above.
+minute). Migrations run automatically as part of `build.sh`, so a schema change
+ships with the code that needs it.
+
+Render's disk is still wiped by this, which now costs you only the uploaded
+source files — see above.
